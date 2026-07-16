@@ -602,12 +602,26 @@ function timeOverlaps(t, start, end){
 function canAssignVolunteer(ev, volId, heatId){
   const vol = ev.volunteers.find(v=>v.id===volId);
   if(!vol) return {ok:false, reason:"Volunteer not found."};
-  const unavail = getUnavailability(ev, vol);
-  if(!unavail) return {ok:true};
   const heat = ev.heats.find(h=>h.id===heatId);
   if(!heat) return {ok:true};
-  if(timeOverlaps(heat.time, unavail.start, unavail.end)){
+  const unavail = getUnavailability(ev, vol);
+  if(unavail && timeOverlaps(heat.time, unavail.start, unavail.end)){
     return {ok:false, reason: `${vol.name} is racing at ${fmt12(unavail.raceTime)} and unavailable from ${fmt12(unavail.start)} to ${fmt12(unavail.end)}. Cannot assign to a station during this window.`};
+  }
+  const heldRole = (ev.roleAssignments||[]).find(a=>a.volunteerId===volId);
+  if(heldRole){
+    return {ok:false, reason: `${vol.name} is assigned to ${heldRole.role} for the whole event and can't also work a per-heat station at the same time.`};
+  }
+  const heatStart = timeToMin(heat.time), heatEnd = heatStart + ev.raceDuration;
+  const overlapping = ev.stationAssignments.find(a=>{
+    if(a.volunteerId!==volId || a.heatId===heatId) return false;
+    const oh = ev.heats.find(h=>h.id===a.heatId); if(!oh) return false;
+    const os = timeToMin(oh.time), oe = os + ev.raceDuration;
+    return heatStart < oe && os < heatEnd;
+  });
+  if(overlapping){
+    const oh = ev.heats.find(h=>h.id===overlapping.heatId);
+    return {ok:false, reason: `${vol.name} is already assigned to ${overlapping.station} for ${oh.division} Heat ${oh.heatNumberInDivision} at ${fmt12(oh.time)}, which overlaps this heat's time window. Nobody can cover two stations at once.`};
   }
   return {ok:true};
 }
@@ -1358,7 +1372,7 @@ function renderVolunteers(main){
 
   main.innerHTML = `
     <div class="toolbar">
-      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Volunteers</h2>${help("Manage volunteer roster and station/role assignments. If a volunteer is also racing, their unavailable window (20 min before race start to race-duration after) is calculated automatically and enforced everywhere. Use the heat + station dropdowns on each card to manually assign them, or Auto-Assign Stations to fill gaps automatically.")}</div>
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Volunteers</h2>${help("Manage volunteer roster and station assignments. If a volunteer is also racing, their unavailable window (20 min before race start to race-duration after) is calculated automatically and enforced everywhere. Use '+ Assign Station' on a card to manually place them, 'Clear Assignments' to pull them off every station, or Auto-Assign Stations to fill gaps automatically. Whole-event roles (Front Desk, Heat Starter, Hydration) are managed on the Stations tab.")}</div>
       <div class="spacer"></div>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><input type="checkbox" id="selectAllVolunteers" ${allSelected?'checked':''}> Select all</label>
       ${selectedVolunteerIds.size ? `<button class="small danger" id="btnBulkDeleteVolunteers">Delete Selected (${selectedVolunteerIds.size})</button>` : ""}
@@ -1396,22 +1410,11 @@ function renderVolunteers(main){
       renderAll();
     });
   });
-  document.querySelectorAll(".quickAssignBtn").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const volId = btn.dataset.vol;
-      const heatSel = document.querySelector(`.quickAssignHeat[data-vol="${volId}"]`);
-      const stationSel = document.querySelector(`.quickAssignStation[data-vol="${volId}"]`);
-      if(!heatSel || !heatSel.value){ alert("Generate the heat schedule first (Heat Generator tab)."); return; }
-      const ok = assignStation(ev, heatSel.value, stationSel.value, volId);
-      if(ok) renderAll();
-    });
-  });
 }
 function volunteerCardHtml(ev, v){
   const unavail = getUnavailability(ev, v);
   const assignments = ev.stationAssignments.filter(a=>a.volunteerId===v.id);
-  const heatOptions = ev.heats.map(h=>`<option value="${h.id}">${fmt12(h.time)} · ${esc(h.division)} H${h.heatNumberInDivision}</option>`).join("");
-  const stationOptions = evStations(ev).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  const roleAssignment = (ev.roleAssignments||[]).find(a=>a.volunteerId===v.id);
   return `<div class="card">
     <div style="display:flex;justify-content:space-between;">
       <div style="display:flex;gap:8px;align-items:flex-start;">
@@ -1421,14 +1424,21 @@ function volunteerCardHtml(ev, v){
       <div><button class="small" onclick="editVolunteer('${v.id}')">Edit</button> <button class="small danger" onclick="deleteVolunteer('${v.id}')">Del</button></div>
     </div>
     <div style="margin-top:8px;font-size:12px;color:var(--muted);">Availability: ${esc(v.availability||"Full day")}</div>
-    ${v.participating ? `<div style="margin-top:6px;font-size:12px;">🏁 Racing${unavail?` at <b>${fmt12(unavail.raceTime)}</b> — unavailable ${fmt12(unavail.start)} to ${fmt12(unavail.end)}`:" (not yet scheduled)"}</div>` : ""}
-    <div style="margin-top:8px;">${assignments.length ? assignments.map(a=>{const h=ev.heats.find(x=>x.id===a.heatId); return `<span class="badge gray">${a.station} · ${h?fmt12(h.time):"?"}</span>`;}).join(" ") : `<span class="badge orange">No station assignments</span>`}</div>
-    <div style="margin-top:10px;display:flex;gap:4px;flex-wrap:wrap;">
-      <select class="quickAssignHeat" data-vol="${v.id}" style="flex:1;min-width:150px;font-size:11px;">${heatOptions||'<option value="">No heats generated yet</option>'}</select>
-      <select class="quickAssignStation" data-vol="${v.id}" style="flex:1;min-width:110px;font-size:11px;">${stationOptions}</select>
-      <button class="small quickAssignBtn" data-vol="${v.id}">Assign</button>
+    ${v.participating ? `<div style="margin-top:4px;font-size:12px;">🏁 Racing${unavail?` at <b>${fmt12(unavail.raceTime)}</b> — unavailable ${fmt12(unavail.start)}–${fmt12(unavail.end)}`:" (not yet scheduled)"}</div>` : ""}
+    <div style="margin-top:8px;">
+      ${roleAssignment
+        ? `<span class="badge gray">${esc(roleAssignment.role)} (whole event)</span>`
+        : (assignments.length ? `<span class="badge gray">${assignments.length} station${assignments.length!==1?'s':''} assigned</span>` : `<span class="badge orange">No assignments</span>`)}
     </div>
-    ${renderVolunteerTimeline(ev,v)}
+    <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="small" onclick="openQuickAssignModal('${v.id}')">+ Assign Station</button>
+      ${assignments.length ? `<button class="small danger" onclick="clearVolunteerAssignments('${v.id}')">Clear Assignments</button>` : ""}
+    </div>
+    <details style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted);">Details &amp; timeline</summary>
+      <div style="margin:8px 0;">${assignments.length ? assignments.map(a=>{const h=ev.heats.find(x=>x.id===a.heatId); return `<span class="badge gray">${a.station} · ${h?fmt12(h.time):"?"}</span>`;}).join(" ") : ""}</div>
+      ${renderVolunteerTimeline(ev,v)}
+    </details>
   </div>`;
 }
 function renderVolunteerTimeline(ev, v){
@@ -1510,43 +1520,87 @@ function deleteVolunteer(id){
   selectedVolunteerIds.delete(id);
   saveDB(); renderAll();
 }
+function openQuickAssignModal(volId){
+  const ev = curEvent();
+  const v = ev.volunteers.find(x=>x.id===volId);
+  if(!ev.heats.length){ alert("Generate the heat schedule first (Heat Generator tab)."); return; }
+  openModal(`
+    <h2>Assign Station — ${esc(v.name)}</h2>
+    <div class="form-row"><label>Heat</label><select id="qa_heat">${ev.heats.map(h=>`<option value="${h.id}">${fmt12(h.time)} · ${esc(h.division)} Heat ${h.heatNumberInDivision}</option>`).join("")}</select></div>
+    <div class="form-row"><label>Station</label><select id="qa_station">${evStations(ev).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="confirmQuickAssign('${volId}')">Assign</button>
+    </div>
+  `);
+}
+function confirmQuickAssign(volId){
+  const ev = curEvent();
+  const heatId = document.getElementById("qa_heat").value;
+  const station = document.getElementById("qa_station").value;
+  const ok = assignStation(ev, heatId, station, volId);
+  if(ok){ closeModal(); renderAll(); }
+}
+function clearVolunteerAssignments(volId){
+  const ev = curEvent();
+  const v = ev.volunteers.find(x=>x.id===volId);
+  if(!confirm(`Remove ${v.name} from every station they're currently assigned to?`)) return;
+  pushUndo();
+  ev.stationAssignments = ev.stationAssignments.filter(a=>a.volunteerId!==volId);
+  saveDB(); renderAll();
+}
 
 /* =========================================================================
    STATIONS TAB — manage the station list + manual assignment / coverage grid
    ========================================================================= */
+let stationsTabFilters = {division:"", onlyGaps:false};
+function volunteerOptionLabel(ev, v){
+  const role = (ev.roleAssignments||[]).find(a=>a.volunteerId===v.id);
+  return role ? `${v.name} (${role.role})` : v.name;
+}
 function renderStationsTab(main){
   const ev = curEvent();
   const stations = evStations(ev);
+  let heats = ev.heats.slice();
+  if(stationsTabFilters.division) heats = heats.filter(h=>h.division===stationsTabFilters.division);
+  if(stationsTabFilters.onlyGaps) heats = heats.filter(h=> stations.some(s=> !ev.stationAssignments.some(a=>a.heatId===h.id && a.station===s)));
+
   main.innerHTML = `
     <div class="card">
-      <div class="section-title"><h2>Stations</h2>${help("Manage which stations exist for this event, then use the grid below to manually assign or reassign volunteers per heat. Red cells mean nobody is covering that station yet — the system still blocks assigning a volunteer who's racing during that heat.")}</div>
+      <div class="section-title"><h2>Stations</h2>${help("Manage which stations exist for this event, then use the grid below to manually assign or reassign volunteers per heat. Red cells mean nobody is covering that station yet — the system blocks assigning a volunteer who's racing, already on a whole-event role, or already covering an overlapping heat elsewhere, and always tells you why.")}</div>
       <div class="toolbar">
-        <input id="newStationName" placeholder="New station name" style="max-width:260px;">
+        <input id="newStationName" placeholder="New station name" style="max-width:220px;">
         <button class="primary" id="btnAddStation">+ Add Station</button>
+        <div class="spacer"></div>
+        <button class="small danger" id="btnResetAssignments">🔄 Reset All Assignments</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;">
         ${stations.map(s=>`<span class="badge gray" style="display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 10px;">${esc(s)} <button class="small danger removeStationBtn" data-station="${esc(s)}" style="padding:1px 6px;">✕</button></span>`).join("")}
       </div>
     </div>
     <div class="card table-wrap">
-      <div class="section-title"><h3>Coverage by Heat</h3>${help("One row per heat, one column per station. Pick a volunteer from each dropdown to assign them manually. Choosing '— Unassigned —' clears that slot.")}</div>
+      <div class="section-title"><h3>Coverage by Heat</h3>${help("One row per heat, one column per station. Pick a volunteer from each dropdown to assign them manually. Choosing '— Unassigned —' clears that slot. Use the filters below if the full grid is too much at once.")}</div>
+      <div class="toolbar">
+        <select id="stationsFilterDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${stationsTabFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><input type="checkbox" id="onlyGapsToggle" ${stationsTabFilters.onlyGaps?'checked':''}> Show only heats with gaps</label>
+      </div>
       <table>
         <tr><th>Time</th><th>Heat</th>${stations.map(s=>`<th>${esc(s)}</th>`).join("")}</tr>
-        ${!ev.heats.length ? `<tr><td colspan="${2+stations.length}" style="color:var(--muted);">No heats generated yet — go to Heat Generator first.</td></tr>` : ev.heats.map(h=>`<tr>
+        ${!heats.length ? `<tr><td colspan="${2+stations.length}" style="color:var(--muted);">${ev.heats.length ? "No heats match this filter." : "No heats generated yet — go to Heat Generator first."}</td></tr>` : heats.map(h=>`<tr>
           <td>${fmt12(h.time)}</td>
           <td>${esc(h.division)} · ${h.heatNumberInDivision}</td>
           ${stations.map(s=>{
             const a = ev.stationAssignments.find(x=>x.heatId===h.id && x.station===s);
             return `<td><select class="stationSelect" data-heat="${h.id}" data-station="${esc(s)}" style="${a?'':'border-color:var(--red);background:var(--red-bg);'}">
               <option value="">— Unassigned —</option>
-              ${ev.volunteers.map(v=>`<option value="${v.id}" ${a&&a.volunteerId===v.id?'selected':''}>${esc(v.name)}</option>`).join("")}
+              ${ev.volunteers.map(v=>`<option value="${v.id}" ${a&&a.volunteerId===v.id?'selected':''}>${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}
             </select></td>`;
           }).join("")}
         </tr>`).join("")}
       </table>
     </div>
     <div class="card">
-      <div class="section-title"><h3>Additional Roles</h3>${help("Shift-based roles that aren't tied to a single heat — Front Desk needs 2 people, Heat Starter needs 1, Hydration Station needs 2. These cover the whole event, so no race-time conflict check applies here; make sure whoever you pick isn't also mid-race.")}</div>
+      <div class="section-title"><h3>Additional Roles</h3>${help("Shift-based roles that aren't tied to a single heat — Front Desk needs 2 people, Heat Starter needs 1, Hydration Station needs 2. These cover the whole event. Assigning someone here automatically clears their per-heat station assignments (they can't be in two places at once), and they'll be blocked from being added to any heat station while holding a role.")}</div>
       ${Object.entries(ROLE_SLOTS).map(([role,count])=>{
         const filled = (ev.roleAssignments||[]).filter(a=>a.role===role);
         return `<div style="margin-bottom:14px;">
@@ -1577,6 +1631,21 @@ function renderStationsTab(main){
     if(!ev.stations || !ev.stations.length) ev.stations = DEFAULT_STATIONS.slice();
     ev.stations.push(name);
     saveDB(); renderAll();
+  });
+  document.getElementById("btnResetAssignments").addEventListener("click", ()=>{
+    if(!confirm("Clear ALL station and role assignments for this event? The station list itself stays as-is — you'll start reassigning from a clean slate.")) return;
+    pushUndo();
+    ev.stationAssignments = [];
+    ev.roleAssignments = [];
+    saveDB(); renderAll();
+  });
+  document.getElementById("stationsFilterDivision").addEventListener("change", (e)=>{
+    stationsTabFilters.division = e.target.value;
+    renderAll();
+  });
+  document.getElementById("onlyGapsToggle").addEventListener("change", (e)=>{
+    stationsTabFilters.onlyGaps = e.target.checked;
+    renderAll();
   });
   document.querySelectorAll(".removeStationBtn").forEach(b=>{
     b.addEventListener("click", ()=> removeStation(b.dataset.station));
@@ -1609,6 +1678,14 @@ function manualAssignStation(heatId, station, volId){
 function assignRoleSlot(role, slotIndex, volId){
   const ev = curEvent();
   if(!ev.roleAssignments) ev.roleAssignments = [];
+  if(volId){
+    const otherRole = ev.roleAssignments.find(a=>a.volunteerId===volId && a.role!==role);
+    if(otherRole){
+      alert(`⚠️ Assignment blocked:\n\n${ev.volunteers.find(v=>v.id===volId).name} is already assigned to ${otherRole.role} for the whole event and can't also cover ${role} at the same time.`);
+      renderAll();
+      return;
+    }
+  }
   pushUndo();
   const filled = ev.roleAssignments.filter(a=>a.role===role);
   const existing = filled[slotIndex];
@@ -1617,6 +1694,8 @@ function assignRoleSlot(role, slotIndex, volId){
   }
   if(volId){
     ev.roleAssignments.push({id:uid(), role, volunteerId:volId});
+    // A volunteer covering a whole-event role can't also work per-heat stations at the same time.
+    ev.stationAssignments = ev.stationAssignments.filter(a=>a.volunteerId!==volId);
   }
   saveDB(); renderAll();
 }
