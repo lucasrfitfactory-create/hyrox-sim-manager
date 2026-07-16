@@ -172,10 +172,12 @@ tr:hover td{background:var(--bg3);}
       <button id="btnVolunteerLogin">Volunteer</button>
     </div>
     <div id="adminPasswordPrompt" class="hidden" style="margin-top:12px;text-align:left;">
-      <label style="font-size:12px;color:var(--muted);font-weight:600;">Enter admin password</label>
+      <label style="font-size:12px;color:var(--muted);font-weight:600;">Admin email</label>
+      <input type="email" id="adminEmailInput" placeholder="you@fitfactoryfitness.com" style="width:100%;margin-top:6px;" autocomplete="username">
+      <label style="font-size:12px;color:var(--muted);font-weight:600;margin-top:8px;display:block;">Password</label>
       <input type="password" id="adminPasswordInput" placeholder="Password" style="width:100%;margin-top:6px;" autocomplete="current-password">
       <button class="primary" style="width:100%;margin-top:10px;" id="btnAdminContinue">Continue</button>
-      <div id="adminPasswordError" style="color:var(--red);font-size:12px;margin-top:8px;display:none;">Incorrect password. Try again.</div>
+      <div id="adminPasswordError" style="color:var(--red);font-size:12px;margin-top:8px;display:none;">Incorrect email or password. Try again.</div>
     </div>
     <div id="volunteerPicker" class="hidden">
       <label style="font-size:12px;color:var(--muted);font-weight:600;">Select your name</label>
@@ -219,6 +221,7 @@ tr:hover td{background:var(--bg3);}
 <!-- Firebase (cloud sync so admin + all volunteers see the same live data across devices) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 "use strict";
 /* =========================================================================
@@ -239,8 +242,9 @@ const CONSTRAINT_TYPES = [
 ];
 const STORE_KEY = "hyroxSimApp_v1";
 
-/* Admin password. Change this string to update the password. */
-const ADMIN_PASSWORD = "lucas08";
+/* Admin login is handled by Firebase Authentication (see below) — no password
+   is stored in this file. The admin account is created once in the Firebase
+   console under Authentication > Users. */
 
 /* =========================================================================
    CLOUD SYNC (Firebase Firestore)
@@ -1805,13 +1809,18 @@ function renderMobileVolunteerView(main){
 /* =========================================================================
    LOGIN / LOGOUT
    ========================================================================= */
-function logout(){ DB.role=null; DB.currentVolunteerId=null; saveDB(); showLogin(); }
+function logout(){
+  DB.role=null; DB.currentVolunteerId=null; saveDB();
+  if(CLOUD_ENABLED && firebase.auth().currentUser){ firebase.auth().signOut(); }
+  showLogin();
+}
 function showLogin(){
   document.getElementById("appShell").style.display = "none";
   document.getElementById("loginScreen").style.display = "flex";
   document.getElementById("adminPasswordPrompt").classList.add("hidden");
   document.getElementById("volunteerPicker").classList.add("hidden");
   document.getElementById("adminPasswordError").style.display = "none";
+  document.getElementById("adminEmailInput").value = "";
   document.getElementById("adminPasswordInput").value = "";
   const vs = document.getElementById("volunteerSelect");
   vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
@@ -1823,14 +1832,28 @@ function enterApp(){
   renderAll();
 }
 function tryAdminLogin(){
-  const val = document.getElementById("adminPasswordInput").value;
-  if(val === ADMIN_PASSWORD){
-    DB.role="admin"; saveDB(true); enterApp();
-  } else {
-    document.getElementById("adminPasswordError").style.display = "block";
+  const email = document.getElementById("adminEmailInput").value.trim();
+  const pass = document.getElementById("adminPasswordInput").value;
+  const btn = document.getElementById("btnAdminContinue");
+  const showError = (msg)=>{
+    const el = document.getElementById("adminPasswordError");
+    el.textContent = msg || "Incorrect email or password. Try again.";
+    el.style.display = "block";
     document.getElementById("adminPasswordInput").value = "";
     document.getElementById("adminPasswordInput").focus();
+  };
+  if(!CLOUD_ENABLED){
+    // No Firebase project configured yet — local-only fallback, no real auth possible.
+    showError("Cloud sync isn't configured yet, so admin login is unavailable. Ask Lucas to finish Firebase setup.");
+    return;
   }
+  if(!email || !pass){ showError("Enter both email and password."); return; }
+  document.getElementById("adminPasswordError").style.display = "none";
+  btn.disabled = true; btn.textContent = "Signing in…";
+  firebase.auth().signInWithEmailAndPassword(email, pass)
+    .then(()=>{ DB.role="admin"; saveDB(true); enterApp(); })
+    .catch((err)=>{ console.error("Admin sign-in failed", err); showError(); })
+    .finally(()=>{ btn.disabled = false; btn.textContent = "Continue"; });
 }
 document.getElementById("btnAdminLogin").addEventListener("click", ()=>{
   document.getElementById("volunteerPicker").classList.add("hidden");
@@ -1840,6 +1863,7 @@ document.getElementById("btnAdminLogin").addEventListener("click", ()=>{
 });
 document.getElementById("btnAdminContinue").addEventListener("click", tryAdminLogin);
 document.getElementById("adminPasswordInput").addEventListener("keydown", (e)=>{ if(e.key==="Enter") tryAdminLogin(); });
+document.getElementById("adminEmailInput").addEventListener("keydown", (e)=>{ if(e.key==="Enter") document.getElementById("adminPasswordInput").focus(); });
 document.getElementById("btnVolunteerLogin").addEventListener("click", ()=>{
   document.getElementById("adminPasswordPrompt").classList.add("hidden");
   document.getElementById("volunteerPicker").classList.remove("hidden");
@@ -1870,7 +1894,19 @@ document.addEventListener("keydown", (e)=>{
    INIT
    ========================================================================= */
 loadDB();
-if(DB.role){ enterApp(); } else { showLogin(); }
+if(DB.role==="admin" && CLOUD_ENABLED){
+  // Don't trust a stale localStorage role — confirm there's a live Firebase
+  // session before granting admin UI. This is a UX check only; the real
+  // enforcement is the Firestore security rule requiring request.auth.
+  showLogin();
+  firebase.auth().onAuthStateChanged(user=>{
+    if(user){ enterApp(); } else { DB.role=null; saveDB(); showLogin(); }
+  });
+} else if(DB.role){
+  enterApp();
+} else {
+  showLogin();
+}
 initCloudSync();
 </script>
 </body>
