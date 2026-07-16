@@ -728,10 +728,10 @@ const TABS = [
   {id:"dashboard", label:"Dashboard", adminOnly:false},
   {id:"sponsors", label:"Sponsors", adminOnly:true},
   {id:"participants", label:"Participants", adminOnly:true},
-  {id:"heatgen", label:"Heat Generator", adminOnly:true},
+  {id:"heatgen", label:"Schedule", adminOnly:true},
   {id:"volunteers", label:"Volunteers", adminOnly:true},
   {id:"stations", label:"Stations", adminOnly:true},
-  {id:"schedule", label:"Event Schedule", adminOnly:false}
+  {id:"schedule", label:"Full Schedule", adminOnly:false}
 ];
 
 function renderTabsNav(){
@@ -1254,7 +1254,7 @@ function renderHeatGen(main){
   const violations = validateConstraints(ev);
   main.innerHTML = `
     <div class="card">
-      <div class="section-title"><h2>Heat Generator</h2>${help("Set event timing, then generate the full day schedule automatically in fixed division order: Men's Doubles → Mixed Doubles → Women's Doubles → Men's Solo → Women's Solo → Relay. Drag participant chips between heats to make manual changes.")}</div>
+      <div class="section-title"><h2>Schedule</h2>${help("Set event timing, then generate the full day schedule automatically in fixed division order: Men's Doubles → Mixed Doubles → Women's Doubles → Men's Solo → Women's Solo → Relay. Click any participant chip to open and edit their record — handy for check-in (e.g. adding a partner name on the spot). Drag participant chips between heats to make manual changes.")}</div>
       <div class="form-grid">
         <div class="form-row"><label>Event Start Time</label><input id="hg_start" type="time" value="${ev.startTime}"></div>
         <div class="form-row"><label>Heat Interval (minutes)</label><input id="hg_interval" type="number" value="${ev.heatInterval}"></div>
@@ -1298,7 +1298,7 @@ function heatColHtml(ev, h){
   const candidates = ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id));
   return `<div class="heat-col" data-heat="${h.id}">
     <div class="heat-header"><span>${esc(h.division)} · Heat ${h.heatNumberInDivision}</span><span class="heat-time">${fmt12(h.time)}</span></div>
-    ${parts.map(p=>`<div class="participant-chip ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" draggable="true" data-pid="${p.id}">
+    ${parts.map(p=>`<div class="participant-chip openParticipantChip ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" draggable="true" data-pid="${p.id}" title="Click to open/edit this participant">
       <span>${esc(teamLabel(p))}</span>
       <span style="display:flex;gap:4px;align-items:center;">
         ${(p.constraints||[]).some(c=>c.type==='vip')?'<span class="tag">VIP</span>':''}
@@ -1349,8 +1349,12 @@ function wireAddToHeat(){
       saveDB(); renderAll();
     });
   });
+  document.querySelectorAll(".openParticipantChip").forEach(chip=>{
+    chip.addEventListener("click", ()=> editParticipant(chip.dataset.pid));
+  });
   document.querySelectorAll(".removeFromHeatBtn").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
+    btn.addEventListener("click", (e)=>{
+      e.stopPropagation();
       const ev = curEvent();
       pushUndo();
       const h = ev.heats.find(x=>x.id===btn.dataset.heat);
@@ -1718,7 +1722,7 @@ function renderSchedule(main){
 
   main.innerHTML = `
     <div class="toolbar no-print">
-      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Event Schedule</h2>${help("Full synchronized view of every heat, station assignment, and volunteer. Filter by division, volunteer, or station. Use Print for a paper copy on event day.")}</div>
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Full Schedule</h2>${help("Full synchronized view of every heat, station assignment, and volunteer. Filter by division, volunteer, or station. Use Print for a paper copy on event day.")}</div>
       <div class="spacer"></div>
       <select id="filterDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${scheduleFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
       <select id="filterVolunteer"><option value="">All Volunteers</option>${ev.volunteers.map(v=>`<option value="${v.id}" ${scheduleFilters.volunteer===v.id?'selected':''}>${esc(v.name)}</option>`).join("")}</select>
