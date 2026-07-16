@@ -118,8 +118,11 @@ tr:hover td{background:var(--bg3);}
 .sponsor-card .meta{color:var(--muted);font-size:12px;margin:4px 0 10px;}
 .sponsor-card .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
 
-.heat-col{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px;min-width:220px;}
+.heat-col{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px;min-width:220px;flex:0 1 240px;}
 .heat-schedule{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;}
+.heat-schedule-wrap{display:flex;flex-wrap:wrap;gap:12px;}
+.division-group{margin-bottom:20px;}
+.division-group-title{font-weight:700;color:var(--accent2);margin-bottom:8px;display:flex;align-items:center;gap:8px;}
 .heat-header{font-weight:700;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;}
 .heat-time{color:var(--accent2);font-size:12px;}
 .participant-chip{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:6px 8px;margin-bottom:6px;font-size:12px;cursor:grab;display:flex;justify-content:space-between;gap:6px;align-items:center;}
@@ -335,6 +338,14 @@ function teamLabel(p){
     return fullName(p) + " & " + (p.partnerNames ? p.partnerNames : "partner");
   }
   return fullName(p);
+}
+function athleteCount(p){
+  if(p.division.indexOf("Doubles")!==-1) return 2;
+  if(p.division==="Relay"){
+    const extra = p.partnerNames ? p.partnerNames.split(",").map(s=>s.trim()).filter(Boolean).length : 0;
+    return 1 + extra;
+  }
+  return 1;
 }
 
 /* =========================================================================
@@ -758,13 +769,16 @@ function renderDashboard(main){
   const byDiv = {}; DIVISIONS.forEach(dv=>byDiv[dv]=0);
   ev.participants.forEach(p=> byDiv[p.division] = (byDiv[p.division]||0)+1);
   const totalReg = ev.participants.length;
+  const totalAthletes = ev.participants.reduce((s,p)=>s+athleteCount(p),0);
+  const PARTICIPANT_GOAL = 100;
+  const goalPct = Math.min(100, Math.round((totalAthletes/PARTICIPANT_GOAL)*100));
 
   const dupes = detectDuplicateParticipants(ev);
   const incomplete = detectIncompleteHeats(ev);
   const volConflicts = detectVolunteerConflicts(ev);
   const constraintViolations = validateConstraints(ev);
   const coverage = detectMissingVolunteerCoverage(ev);
-  const unassignedVols = ev.volunteers.filter(v=> !ev.stationAssignments.some(a=>a.volunteerId===v.id) && !Object.keys(ROLE_SLOTS).some(r=> ev.roleAssignments.some(ra=>ra.volunteerId===v.id)) );
+  const missingRoles = detectMissingRoleCoverage(ev);
 
   const sponsorConfirmed = ev.sponsors.filter(s=>s.status==="Confirmed").length;
 
@@ -778,6 +792,11 @@ function renderDashboard(main){
 
     <div class="grid cols-4">
       <div class="stat"><div class="num">${totalReg}</div><div class="label">Total Registrations</div></div>
+      <div class="stat">
+        <div class="num">${totalAthletes} <span style="font-size:13px;color:var(--muted);font-weight:400;">/ ${PARTICIPANT_GOAL}</span></div>
+        <div class="label">Total Participants ${help("Actual athlete headcount, not registration rows — a Doubles/Mixed Doubles entry counts as 2 people. Relay counts 1 + however many names are in that entry's Partner Names field (comma-separated), so fill that in for an accurate count. Goal line is 100 participants.")}</div>
+        <div style="background:var(--bg3);border-radius:6px;height:6px;margin-top:6px;overflow:hidden;"><div style="background:${goalPct>=100?'var(--green)':'var(--accent)'};height:100%;width:${goalPct}%;"></div></div>
+      </div>
       <div class="stat"><div class="num">${ev.heats.length}</div><div class="label">Heats Scheduled</div></div>
       <div class="stat"><div class="num">${ev.sponsors.length}</div><div class="label">Sponsors (${sponsorConfirmed} confirmed)</div></div>
       <div class="stat"><div class="num">${ev.volunteers.length}</div><div class="label">Volunteers</div></div>
@@ -791,7 +810,7 @@ function renderDashboard(main){
     </div>
 
     <div class="card">
-      <div class="section-title"><h3>Issues Requiring Attention</h3>${help("Auto-detected problems: duplicate participants, incomplete heats, volunteer scheduling conflicts, constraint violations, and station coverage gaps. Nothing is ever silently ignored.")}</div>
+      <div class="section-title"><h3>Issues Requiring Attention</h3>${help("Auto-detected problems: duplicate participants, incomplete heats, volunteer scheduling conflicts, constraint violations, station coverage gaps, and unfilled role slots. Nothing is ever silently ignored.")}</div>
       <div class="grid cols-4" style="margin-bottom:14px;">
         <div class="stat ${statClass(dupes.length)}"><div class="num">${dupes.length}</div><div class="label">Duplicate Participants</div></div>
         <div class="stat ${statClass(incomplete.length)}"><div class="num">${incomplete.length}</div><div class="label">Incomplete Heats</div></div>
@@ -804,7 +823,8 @@ function renderDashboard(main){
         ${volConflicts.map(c=>`<div class="warn-item red">🔴 ${esc(c.reason)}</div>`).join("")}
         ${constraintViolations.map(v=>`<div class="warn-item ${v.level}">${v.level==='red'?'🔴':'🟠'} ${esc(v.msg)}</div>`).join("")}
         ${coverage.missing>0?`<div class="warn-item orange">🟠 ${coverage.missing} of ${coverage.need} station slots are unfilled across all heats.</div>`:""}
-        ${(!dupes.length && !incomplete.length && !volConflicts.length && !constraintViolations.length && !coverage.missing) ? `<div class="warn-item green">🟢 No issues detected. Event is fully ready.</div>` : ""}
+        ${missingRoles.map(r=>`<div class="warn-item orange">🟠 ${esc(r.role)} needs ${r.needed-r.filled} more volunteer(s) (${r.filled}/${r.needed} filled).</div>`).join("")}
+        ${(!dupes.length && !incomplete.length && !volConflicts.length && !constraintViolations.length && !coverage.missing && !missingRoles.length) ? `<div class="warn-item green">🟢 No issues detected. Event is fully ready.</div>` : ""}
       </div>
     </div>
 
@@ -996,24 +1016,28 @@ function deleteSponsor(id){ if(!confirm("Delete this sponsor?")) return; pushUnd
 /* =========================================================================
    PARTICIPANTS
    ========================================================================= */
+let selectedParticipantIds = new Set();
 function renderParticipants(main){
   const ev = curEvent();
   const q = (document.getElementById("globalSearch").value||"").toLowerCase();
   const dupes = new Set(detectDuplicateParticipants(ev).map(p=>p.id));
   const list = ev.participants.filter(p=> !q || (fullName(p)+p.email+p.division).toLowerCase().includes(q));
+  const allSelected = list.length>0 && list.every(p=>selectedParticipantIds.has(p.id));
 
   main.innerHTML = `
     <div class="toolbar">
-      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Participants</h2>${help("All race registrations. Doubles/Mixed/Relay each represent one team entry; Solo represents one athlete. Duplicate emails are flagged automatically. Import a CSV to bulk-load registrations.")}</div>
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Participants</h2>${help("All race registrations. Doubles/Mixed/Relay each represent one team entry; Solo represents one athlete. Duplicate emails are flagged automatically. Import a CSV to bulk-load registrations. Check rows and use Delete Selected to remove several at once.")}</div>
       <div class="spacer"></div>
+      ${selectedParticipantIds.size ? `<button class="small danger" id="btnBulkDeleteParticipants">Delete Selected (${selectedParticipantIds.size})</button>` : ""}
       <button class="small" id="btnImportCsv">⬆ Import CSV</button>
       <input type="file" id="csvFile" accept=".csv" class="hidden">
       <button class="primary" id="btnAddParticipant">+ Add Participant</button>
     </div>
     <div class="card table-wrap">
       <table>
-        <tr><th>Name / Team</th><th>Division</th><th>Member</th><th>Contact</th><th>Constraints</th><th>Price</th><th>Payment</th><th></th></tr>
+        <tr><th><input type="checkbox" id="selectAllParticipants" ${allSelected?'checked':''}></th><th>Name / Team</th><th>Division</th><th>Member</th><th>Contact</th><th>Constraints</th><th>Price</th><th>Payment</th><th></th></tr>
         ${list.map(p=>`<tr style="${dupes.has(p.id)?'background:var(--red-bg);':''}">
+          <td><input type="checkbox" class="pSelectCheckbox" data-id="${p.id}" ${selectedParticipantIds.has(p.id)?'checked':''}></td>
           <td>${esc(teamLabel(p))}${dupes.has(p.id)?' <span class="badge red">DUP</span>':''}</td>
           <td>${esc(p.division)}</td>
           <td>${esc(p.memberStatus)}</td>
@@ -1029,6 +1053,26 @@ function renderParticipants(main){
   document.getElementById("btnAddParticipant").addEventListener("click", ()=> openParticipantModal(null));
   document.getElementById("btnImportCsv").addEventListener("click", ()=> document.getElementById("csvFile").click());
   document.getElementById("csvFile").addEventListener("change", handleCsvImport);
+  document.getElementById("selectAllParticipants").addEventListener("change", (e)=>{
+    if(e.target.checked) list.forEach(p=>selectedParticipantIds.add(p.id));
+    else list.forEach(p=>selectedParticipantIds.delete(p.id));
+    renderAll();
+  });
+  document.querySelectorAll(".pSelectCheckbox").forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      if(cb.checked) selectedParticipantIds.add(cb.dataset.id); else selectedParticipantIds.delete(cb.dataset.id);
+      renderAll();
+    });
+  });
+  const bulkBtn = document.getElementById("btnBulkDeleteParticipants");
+  if(bulkBtn) bulkBtn.addEventListener("click", ()=>{
+    if(!confirm(`Delete ${selectedParticipantIds.size} selected participant(s)? This also removes them from any heat they're scheduled in.`)) return;
+    pushUndo();
+    ev.participants = ev.participants.filter(p=>!selectedParticipantIds.has(p.id));
+    ev.heats.forEach(h=>{ h.participantIds = h.participantIds.filter(id=>!selectedParticipantIds.has(id)); });
+    selectedParticipantIds.clear();
+    saveDB(); renderAll();
+  });
 }
 function constraintLabel(c){
   const meta = CONSTRAINT_TYPES.find(x=>x.v===c.type);
@@ -1127,7 +1171,15 @@ function saveParticipant(id){
   saveDB(); closeModal(); renderAll();
 }
 function editParticipant(id){ openParticipantModal(curEvent().participants.find(p=>p.id===id)); setTimeout(wireConstraintTypeChange,0); }
-function deleteParticipant(id){ if(!confirm("Delete this participant?")) return; pushUndo(); const ev=curEvent(); ev.participants=ev.participants.filter(p=>p.id!==id); saveDB(); renderAll(); }
+function deleteParticipant(id){
+  if(!confirm("Delete this participant?")) return;
+  pushUndo();
+  const ev=curEvent();
+  ev.participants=ev.participants.filter(p=>p.id!==id);
+  ev.heats.forEach(h=>{ const idx=h.participantIds.indexOf(id); if(idx>=0) h.participantIds.splice(idx,1); });
+  selectedParticipantIds.delete(id);
+  saveDB(); renderAll();
+}
 
 function handleCsvImport(e){
   const file = e.target.files[0]; if(!file) return;
@@ -1145,8 +1197,35 @@ function handleCsvImport(e){
         teamName: row["Team Name"]||row.teamName||"",
         partnerNames: row["Partner Names"]||row.partnerNames||"",
         constraints: [],
-        discount:0, priceOverride:null,
+        discount: Number(row["Discount"]||row.discount)||0,
+        priceOverride: (row["Price Override"]||row.priceOverride)!==undefined && (row["Price Override"]||row.priceOverride)!=="" ? Number(row["Price Override"]||row.priceOverride) : null,
         paymentStatus: row["Payment Status"]||row.paymentStatus||"Pending"
+      });
+    });
+    saveDB(); renderAll();
+  }});
+}
+function handleVolunteerCsvImport(e){
+  const file = e.target.files[0]; if(!file) return;
+  Papa.parse(file, {header:true, skipEmptyLines:true, complete: (res)=>{
+    const ev = curEvent(); pushUndo();
+    res.data.forEach(row=>{
+      const participatingRaw = (row["Participating"]||row.participating||"").toString().trim();
+      const participating = /^(y|yes|true|1)$/i.test(participatingRaw);
+      let participantId = null;
+      const linkedEmail = (row["Linked Participant Email"]||row.linkedParticipantEmail||"").toString().trim().toLowerCase();
+      if(linkedEmail){
+        const match = ev.participants.find(p=>(p.email||"").toLowerCase()===linkedEmail);
+        if(match) participantId = match.id;
+      }
+      ev.volunteers.push({
+        id: uid(),
+        name: row["Name"]||row.name||"",
+        email: row["Email"]||row.email||"",
+        phone: row["Phone"]||row.phone||"",
+        availability: row["Availability"]||row.availability||"Full day",
+        notes: row["Notes"]||row.notes||"",
+        participating, participantId
       });
     });
     saveDB(); renderAll();
@@ -1179,8 +1258,15 @@ function renderHeatGen(main){
     </div>` : ""}
 
     <div class="card">
-      <div class="section-title"><h3>Schedule</h3>${help("Drag a participant chip onto another heat's column to move them, or use the '+ add participant' dropdown at the bottom of a heat to place someone directly. Click the ✕ on a chip to pull them out of a heat without deleting their record. Locked/manual-locked participants are marked and should be moved carefully.")}</div>
-      <div class="heat-schedule" id="heatSchedule">${ev.heats.length ? ev.heats.map(h=>heatColHtml(ev,h)).join("") : "<div style='color:var(--muted)'>No schedule generated yet.</div>"}</div>
+      <div class="section-title"><h3>Schedule</h3>${help("Grouped by division in run order. Drag a participant chip onto another heat's column to move them, or use the '+ add participant' dropdown at the bottom of a heat to place someone directly. Click the ✕ on a chip to pull them out of a heat without deleting their record. Locked/manual-locked participants are marked and should be moved carefully.")}</div>
+      <div id="heatSchedule">${ev.heats.length ? DIVISIONS.map(div=>{
+        const divHeats = ev.heats.filter(h=>h.division===div);
+        if(!divHeats.length) return "";
+        return `<div class="division-group">
+          <div class="division-group-title">${esc(div)} <span class="badge gray">${divHeats.length} heat${divHeats.length!==1?'s':''}</span></div>
+          <div class="heat-schedule-wrap">${divHeats.map(h=>heatColHtml(ev,h)).join("")}</div>
+        </div>`;
+      }).join("") : "<div style='color:var(--muted)'>No schedule generated yet.</div>"}</div>
     </div>
   `;
   document.getElementById("btnGenerate").addEventListener("click", ()=>{
@@ -1263,15 +1349,21 @@ function wireAddToHeat(){
 /* =========================================================================
    VOLUNTEERS
    ========================================================================= */
+let selectedVolunteerIds = new Set();
 function renderVolunteers(main){
   const ev = curEvent();
   const q = (document.getElementById("globalSearch").value||"").toLowerCase();
   const list = ev.volunteers.filter(v=> !q || v.name.toLowerCase().includes(q));
+  const allSelected = list.length>0 && list.every(v=>selectedVolunteerIds.has(v.id));
 
   main.innerHTML = `
     <div class="toolbar">
-      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Volunteers</h2>${help("Manage volunteer roster and station/role assignments. If a volunteer is also racing, their unavailable window (20 min before race start to race-duration after) is calculated automatically and enforced everywhere.")}</div>
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Volunteers</h2>${help("Manage volunteer roster and station/role assignments. If a volunteer is also racing, their unavailable window (20 min before race start to race-duration after) is calculated automatically and enforced everywhere. Use the heat + station dropdowns on each card to manually assign them, or Auto-Assign Stations to fill gaps automatically.")}</div>
       <div class="spacer"></div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><input type="checkbox" id="selectAllVolunteers" ${allSelected?'checked':''}> Select all</label>
+      ${selectedVolunteerIds.size ? `<button class="small danger" id="btnBulkDeleteVolunteers">Delete Selected (${selectedVolunteerIds.size})</button>` : ""}
+      <button class="small" id="btnImportVolunteerCsv">⬆ Import CSV</button>
+      <input type="file" id="volunteerCsvFile" accept=".csv" class="hidden">
       <button class="small" id="btnAutoAssign">⚙ Auto-Assign Stations</button>
       <button class="primary" id="btnAddVolunteer">+ Add Volunteer</button>
     </div>
@@ -1281,18 +1373,61 @@ function renderVolunteers(main){
   `;
   document.getElementById("btnAddVolunteer").addEventListener("click", ()=> openVolunteerModal(null));
   document.getElementById("btnAutoAssign").addEventListener("click", ()=>{ autoAssignStations(ev); renderAll(); });
+  document.getElementById("btnImportVolunteerCsv").addEventListener("click", ()=> document.getElementById("volunteerCsvFile").click());
+  document.getElementById("volunteerCsvFile").addEventListener("change", handleVolunteerCsvImport);
+  document.getElementById("selectAllVolunteers").addEventListener("change", (e)=>{
+    if(e.target.checked) list.forEach(v=>selectedVolunteerIds.add(v.id));
+    else list.forEach(v=>selectedVolunteerIds.delete(v.id));
+    renderAll();
+  });
+  const bulkBtn = document.getElementById("btnBulkDeleteVolunteers");
+  if(bulkBtn) bulkBtn.addEventListener("click", ()=>{
+    if(!confirm(`Delete ${selectedVolunteerIds.size} selected volunteer(s)? This also clears their station/role assignments.`)) return;
+    pushUndo();
+    ev.volunteers = ev.volunteers.filter(v=>!selectedVolunteerIds.has(v.id));
+    ev.stationAssignments = ev.stationAssignments.filter(a=>!selectedVolunteerIds.has(a.volunteerId));
+    ev.roleAssignments = ev.roleAssignments.filter(a=>!selectedVolunteerIds.has(a.volunteerId));
+    selectedVolunteerIds.clear();
+    saveDB(); renderAll();
+  });
+  document.querySelectorAll(".volSelectCheckbox").forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      if(cb.checked) selectedVolunteerIds.add(cb.dataset.id); else selectedVolunteerIds.delete(cb.dataset.id);
+      renderAll();
+    });
+  });
+  document.querySelectorAll(".quickAssignBtn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const volId = btn.dataset.vol;
+      const heatSel = document.querySelector(`.quickAssignHeat[data-vol="${volId}"]`);
+      const stationSel = document.querySelector(`.quickAssignStation[data-vol="${volId}"]`);
+      if(!heatSel || !heatSel.value){ alert("Generate the heat schedule first (Heat Generator tab)."); return; }
+      const ok = assignStation(ev, heatSel.value, stationSel.value, volId);
+      if(ok) renderAll();
+    });
+  });
 }
 function volunteerCardHtml(ev, v){
   const unavail = getUnavailability(ev, v);
   const assignments = ev.stationAssignments.filter(a=>a.volunteerId===v.id);
+  const heatOptions = ev.heats.map(h=>`<option value="${h.id}">${fmt12(h.time)} · ${esc(h.division)} H${h.heatNumberInDivision}</option>`).join("");
+  const stationOptions = evStations(ev).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("");
   return `<div class="card">
     <div style="display:flex;justify-content:space-between;">
-      <div><div style="font-weight:700;font-size:15px;">${esc(v.name)}</div><div style="color:var(--muted);font-size:12px;">${esc(v.email)} · ${esc(v.phone)}</div></div>
+      <div style="display:flex;gap:8px;align-items:flex-start;">
+        <input type="checkbox" class="volSelectCheckbox" data-id="${v.id}" ${selectedVolunteerIds.has(v.id)?'checked':''} style="margin-top:4px;">
+        <div><div style="font-weight:700;font-size:15px;">${esc(v.name)}</div><div style="color:var(--muted);font-size:12px;">${esc(v.email)} · ${esc(v.phone)}</div></div>
+      </div>
       <div><button class="small" onclick="editVolunteer('${v.id}')">Edit</button> <button class="small danger" onclick="deleteVolunteer('${v.id}')">Del</button></div>
     </div>
     <div style="margin-top:8px;font-size:12px;color:var(--muted);">Availability: ${esc(v.availability||"Full day")}</div>
     ${v.participating ? `<div style="margin-top:6px;font-size:12px;">🏁 Racing${unavail?` at <b>${fmt12(unavail.raceTime)}</b> — unavailable ${fmt12(unavail.start)} to ${fmt12(unavail.end)}`:" (not yet scheduled)"}</div>` : ""}
     <div style="margin-top:8px;">${assignments.length ? assignments.map(a=>{const h=ev.heats.find(x=>x.id===a.heatId); return `<span class="badge gray">${a.station} · ${h?fmt12(h.time):"?"}</span>`;}).join(" ") : `<span class="badge orange">No station assignments</span>`}</div>
+    <div style="margin-top:10px;display:flex;gap:4px;flex-wrap:wrap;">
+      <select class="quickAssignHeat" data-vol="${v.id}" style="flex:1;min-width:150px;font-size:11px;">${heatOptions||'<option value="">No heats generated yet</option>'}</select>
+      <select class="quickAssignStation" data-vol="${v.id}" style="flex:1;min-width:110px;font-size:11px;">${stationOptions}</select>
+      <button class="small quickAssignBtn" data-vol="${v.id}">Assign</button>
+    </div>
     ${renderVolunteerTimeline(ev,v)}
   </div>`;
 }
@@ -1371,6 +1506,8 @@ function deleteVolunteer(id){
   const ev = curEvent();
   ev.volunteers = ev.volunteers.filter(v=>v.id!==id);
   ev.stationAssignments = ev.stationAssignments.filter(a=>a.volunteerId!==id);
+  ev.roleAssignments = ev.roleAssignments.filter(a=>a.volunteerId!==id);
+  selectedVolunteerIds.delete(id);
   saveDB(); renderAll();
 }
 
@@ -1408,7 +1545,28 @@ function renderStationsTab(main){
         </tr>`).join("")}
       </table>
     </div>
+    <div class="card">
+      <div class="section-title"><h3>Additional Roles</h3>${help("Shift-based roles that aren't tied to a single heat — Front Desk needs 2 people, Heat Starter needs 1, Hydration Station needs 2. These cover the whole event, so no race-time conflict check applies here; make sure whoever you pick isn't also mid-race.")}</div>
+      ${Object.entries(ROLE_SLOTS).map(([role,count])=>{
+        const filled = (ev.roleAssignments||[]).filter(a=>a.role===role);
+        return `<div style="margin-bottom:14px;">
+          <div style="font-weight:600;margin-bottom:6px;">${esc(role)} <span class="badge ${filled.length>=count?'green':'orange'}">${filled.length}/${count} filled</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${Array.from({length:count}).map((_,i)=>{
+              const existing = filled[i];
+              return `<select class="roleSelect" data-role="${esc(role)}" data-slot="${i}">
+                <option value="">— Unassigned (slot ${i+1}) —</option>
+                ${ev.volunteers.map(v=>`<option value="${v.id}" ${existing&&existing.volunteerId===v.id?'selected':''}>${esc(v.name)}</option>`).join("")}
+              </select>`;
+            }).join("")}
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
   `;
+  document.querySelectorAll(".roleSelect").forEach(sel=>{
+    sel.addEventListener("change", ()=> assignRoleSlot(sel.dataset.role, Number(sel.dataset.slot), sel.value));
+  });
   const addBtn = document.getElementById("btnAddStation");
   if(addBtn) addBtn.addEventListener("click", ()=>{
     const input = document.getElementById("newStationName");
@@ -1447,6 +1605,28 @@ function manualAssignStation(heatId, station, volId){
   }
   assignStation(ev, heatId, station, volId);
   renderAll();
+}
+function assignRoleSlot(role, slotIndex, volId){
+  const ev = curEvent();
+  if(!ev.roleAssignments) ev.roleAssignments = [];
+  pushUndo();
+  const filled = ev.roleAssignments.filter(a=>a.role===role);
+  const existing = filled[slotIndex];
+  if(existing){
+    ev.roleAssignments = ev.roleAssignments.filter(a=>a.id!==existing.id);
+  }
+  if(volId){
+    ev.roleAssignments.push({id:uid(), role, volunteerId:volId});
+  }
+  saveDB(); renderAll();
+}
+function detectMissingRoleCoverage(ev){
+  const missing = [];
+  Object.entries(ROLE_SLOTS).forEach(([role,count])=>{
+    const filled = (ev.roleAssignments||[]).filter(a=>a.role===role).length;
+    if(filled<count) missing.push({role, filled, needed:count});
+  });
+  return missing;
 }
 
 /* =========================================================================
