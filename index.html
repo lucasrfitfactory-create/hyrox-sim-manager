@@ -223,7 +223,7 @@ tr:hover td{background:var(--bg3);}
    ========================================================================= */
 const DIVISIONS = ["Men's Doubles","Mixed Doubles","Women's Doubles","Men's Solo","Women's Solo","Relay"];
 const CAPACITY = {"Men's Solo":2,"Women's Solo":2,"Men's Doubles":2,"Mixed Doubles":2,"Women's Doubles":2,"Relay":1};
-const STATIONS = ["SkiErg","Sled Push","Sled Pull","Burpee Broad Jumps","RowErg","Farmer's Carry","Sandbag Lunges","Wall Balls"];
+const DEFAULT_STATIONS = ["SkiErg","Sled Push","Sled Pull","Burpee Broad Jumps","RowErg","Farmer's Carry","Sandbag Lunges","Wall Balls"];
 const ROLE_SLOTS = {"Front Desk":2,"Heat Starter":1,"Hydration Station":2};
 const SPONSOR_STATUSES = ["Waiting for response","Confirmed","Declined"];
 const PAYMENT_STATUSES = ["Paid","Pending","Complimentary"];
@@ -326,6 +326,16 @@ function download(filename, text){
   URL.revokeObjectURL(a.href);
 }
 function fullName(p){ return (p.firstName||"")+" "+(p.lastName||""); }
+function evStations(ev){ return (ev.stations && ev.stations.length) ? ev.stations : DEFAULT_STATIONS; }
+function validEmail(e){ return !e || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
+function teamLabel(p){
+  if(p.division==="Relay") return p.teamName || fullName(p);
+  if(p.division.indexOf("Doubles")!==-1){
+    if(p.teamName) return p.teamName;
+    return fullName(p) + " & " + (p.partnerNames ? p.partnerNames : "partner");
+  }
+  return fullName(p);
+}
 
 /* =========================================================================
    STATE / PERSISTENCE
@@ -340,7 +350,7 @@ function defaultEvent(name, dateStr){
     id: uid(), name: name, date: dateStr,
     startTime: "08:00", heatInterval: 10, raceDuration: 100,
     sponsors: [], volunteers: [], participants: [], heats: [],
-    stationAssignments: [], roleAssignments: [],
+    stationAssignments: [], roleAssignments: [], stations: DEFAULT_STATIONS.slice(),
     createdAt: Date.now()
   };
 }
@@ -606,7 +616,7 @@ function autoAssignStations(ev){
   let rotation = ev.volunteers.map(v=>v.id);
   let ptr = 0;
   ev.heats.forEach(heat=>{
-    STATIONS.forEach(station=>{
+    evStations(ev).forEach(station=>{
       let existing = ev.stationAssignments.find(a=>a.heatId===heat.id && a.station===station);
       if(existing) return;
       let tries = 0; let placed=false;
@@ -641,7 +651,7 @@ function detectDuplicateParticipants(ev){
 function detectEmptyStations(ev){
   const empties = [];
   ev.heats.forEach(h=>{
-    STATIONS.forEach(st=>{
+    evStations(ev).forEach(st=>{
       if(!ev.stationAssignments.some(a=>a.heatId===h.id && a.station===st)){
         empties.push({heat:h, station:st});
       }
@@ -661,7 +671,7 @@ function detectVolunteerConflicts(ev){
   return conflicts;
 }
 function detectMissingVolunteerCoverage(ev){
-  const need = ev.heats.length * STATIONS.length;
+  const need = ev.heats.length * evStations(ev).length;
   const have = ev.stationAssignments.length;
   return {need, have, missing: Math.max(0, need-have)};
 }
@@ -695,6 +705,7 @@ const TABS = [
   {id:"participants", label:"Participants", adminOnly:true},
   {id:"heatgen", label:"Heat Generator", adminOnly:true},
   {id:"volunteers", label:"Volunteers", adminOnly:true},
+  {id:"stations", label:"Stations", adminOnly:true},
   {id:"schedule", label:"Event Schedule", adminOnly:false}
 ];
 
@@ -718,6 +729,7 @@ function renderAll(){
   else if(currentTab==="participants") renderParticipants(main);
   else if(currentTab==="heatgen") renderHeatGen(main);
   else if(currentTab==="volunteers") renderVolunteers(main);
+  else if(currentTab==="stations") renderStationsTab(main);
   else if(currentTab==="schedule") renderSchedule(main);
 }
 
@@ -857,7 +869,7 @@ function wireFinancialDashboard(ev){
   if(btn) btn.addEventListener("click", ()=>{
     const header = ["Participant/Team","Division","Member Status","Standard Price","Discount","Amount Collected","Payment Status"];
     const rows = ev.participants.map(p=>[
-      p.division==="Relay"||p.division.indexOf("Doubles")!==-1 ? (p.teamName||fullName(p)) : fullName(p),
+      teamLabel(p),
       p.division, p.memberStatus, standardPrice(p), p.discount||0, collectedAmount(p), p.paymentStatus
     ]);
     const csv = Papa.unparse([header, ...rows]);
@@ -938,8 +950,8 @@ function openSponsorModal(sponsor){
     <div class="form-grid">
       <div class="form-row"><label>Company Name</label><input id="f_company" value="${esc(s.company)}"></div>
       <div class="form-row"><label>Contact Name</label><input id="f_contact" value="${esc(s.contact)}"></div>
-      <div class="form-row"><label>Email</label><input id="f_email" value="${esc(s.email)}"></div>
-      <div class="form-row"><label>Phone Number</label><input id="f_phone" value="${esc(s.phone)}"></div>
+      <div class="form-row"><label>Email</label><input type="email" id="f_email" value="${esc(s.email)}"></div>
+      <div class="form-row"><label>Phone Number</label><input type="tel" id="f_phone" value="${esc(s.phone)}"></div>
       <div class="form-row"><label>Status</label><select id="f_status">${SPONSOR_STATUSES.map(x=>`<option ${x===s.status?'selected':''}>${x}</option>`).join("")}</select></div>
     </div>
     <div class="form-row"><label>Checklist</label>
@@ -959,10 +971,12 @@ function openSponsorModal(sponsor){
 }
 function saveSponsor(id){
   const ev = curEvent();
+  const emailVal = document.getElementById("f_email").value.trim();
+  if(!validEmail(emailVal)){ alert("Please enter a valid email address (e.g. name@company.com)."); return; }
   const data = {
     company: document.getElementById("f_company").value.trim(),
     contact: document.getElementById("f_contact").value.trim(),
-    email: document.getElementById("f_email").value.trim(),
+    email: emailVal,
     phone: document.getElementById("f_phone").value.trim(),
     status: document.getElementById("f_status").value,
     shipped: document.getElementById("f_shipped").checked,
@@ -1000,7 +1014,7 @@ function renderParticipants(main){
       <table>
         <tr><th>Name / Team</th><th>Division</th><th>Member</th><th>Contact</th><th>Constraints</th><th>Price</th><th>Payment</th><th></th></tr>
         ${list.map(p=>`<tr style="${dupes.has(p.id)?'background:var(--red-bg);':''}">
-          <td>${esc(p.division.indexOf("Doubles")!==-1||p.division==="Relay" ? (p.teamName||fullName(p)) : fullName(p))}${dupes.has(p.id)?' <span class="badge red">DUP</span>':''}</td>
+          <td>${esc(teamLabel(p))}${dupes.has(p.id)?' <span class="badge red">DUP</span>':''}</td>
           <td>${esc(p.division)}</td>
           <td>${esc(p.memberStatus)}</td>
           <td>${esc(p.email)}<br><span style="color:var(--muted)">${esc(p.phone)}</span></td>
@@ -1035,8 +1049,8 @@ function openParticipantModal(participant){
     <div class="form-grid">
       <div class="form-row"><label>First Name</label><input id="f_fn" value="${esc(p.firstName)}"></div>
       <div class="form-row"><label>Last Name</label><input id="f_ln" value="${esc(p.lastName)}"></div>
-      <div class="form-row"><label>Email</label><input id="f_email" value="${esc(p.email)}"></div>
-      <div class="form-row"><label>Phone</label><input id="f_phone" value="${esc(p.phone)}"></div>
+      <div class="form-row"><label>Email</label><input type="email" id="f_email" value="${esc(p.email)}"></div>
+      <div class="form-row"><label>Phone</label><input type="tel" id="f_phone" value="${esc(p.phone)}"></div>
       <div class="form-row"><label>Member Status</label><select id="f_member"><option ${p.memberStatus==='Member'?'selected':''}>Member</option><option ${p.memberStatus==='Non-member'?'selected':''}>Non-member</option></select></div>
       <div class="form-row"><label>Division</label><select id="f_div">${DIVISIONS.map(d=>`<option ${d===p.division?'selected':''}>${d}</option>`).join("")}</select></div>
       <div class="form-row"><label>Team Name (doubles/relay)</label><input id="f_team" value="${esc(p.teamName)}"></div>
@@ -1085,6 +1099,8 @@ function wireConstraintTypeChange(){
 setTimeout(wireConstraintTypeChange, 0);
 function saveParticipant(id){
   const ev = curEvent();
+  const emailVal = document.getElementById("f_email").value.trim();
+  if(!validEmail(emailVal)){ alert("Please enter a valid email address (e.g. name@example.com)."); return; }
   const rows = document.querySelectorAll("#constraintsList > div");
   const constraints = Array.from(rows).map(r=>({
     type: r.querySelector(".c_type").value,
@@ -1094,7 +1110,7 @@ function saveParticipant(id){
   const data = {
     firstName: document.getElementById("f_fn").value.trim(),
     lastName: document.getElementById("f_ln").value.trim(),
-    email: document.getElementById("f_email").value.trim(),
+    email: emailVal,
     phone: document.getElementById("f_phone").value.trim(),
     memberStatus: document.getElementById("f_member").value,
     division: document.getElementById("f_div").value,
@@ -1163,7 +1179,7 @@ function renderHeatGen(main){
     </div>` : ""}
 
     <div class="card">
-      <div class="section-title"><h3>Schedule</h3>${help("Drag a participant chip onto another heat's column to move them. Locked/manual-locked participants are marked and should be moved carefully.")}</div>
+      <div class="section-title"><h3>Schedule</h3>${help("Drag a participant chip onto another heat's column to move them, or use the '+ add participant' dropdown at the bottom of a heat to place someone directly. Click the ✕ on a chip to pull them out of a heat without deleting their record. Locked/manual-locked participants are marked and should be moved carefully.")}</div>
       <div class="heat-schedule" id="heatSchedule">${ev.heats.length ? ev.heats.map(h=>heatColHtml(ev,h)).join("") : "<div style='color:var(--muted)'>No schedule generated yet.</div>"}</div>
     </div>
   `;
@@ -1175,16 +1191,28 @@ function renderHeatGen(main){
     saveDB(); renderAll();
   });
   wireHeatDragDrop();
+  wireAddToHeat();
 }
 function heatColHtml(ev, h){
   const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
+  const candidates = ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id));
   return `<div class="heat-col" data-heat="${h.id}">
     <div class="heat-header"><span>${esc(h.division)} · Heat ${h.heatNumberInDivision}</span><span class="heat-time">${fmt12(h.time)}</span></div>
     ${parts.map(p=>`<div class="participant-chip ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" draggable="true" data-pid="${p.id}">
-      <span>${esc(p.division.indexOf("Doubles")!==-1||p.division==="Relay"?(p.teamName||fullName(p)):fullName(p))}</span>
-      ${(p.constraints||[]).some(c=>c.type==='vip')?'<span class="tag">VIP</span>':''}
+      <span>${esc(teamLabel(p))}</span>
+      <span style="display:flex;gap:4px;align-items:center;">
+        ${(p.constraints||[]).some(c=>c.type==='vip')?'<span class="tag">VIP</span>':''}
+        <button class="small danger removeFromHeatBtn" data-heat="${h.id}" data-pid="${p.id}" style="padding:0 5px;" title="Remove from this heat">✕</button>
+      </span>
     </div>`).join("")}
     ${parts.length < CAPACITY[h.division] ? `<div style="color:var(--orange);font-size:11px;">Under capacity</div>` : ""}
+    ${parts.length > CAPACITY[h.division] ? `<div style="color:var(--red);font-size:11px;">Over capacity (manual)</div>` : ""}
+    <div style="margin-top:8px;">
+      <select class="addToHeatSelect" data-heat="${h.id}" style="width:100%;font-size:11px;">
+        <option value="">+ add participant…</option>
+        ${candidates.map(p=>`<option value="${p.id}">${esc(teamLabel(p))}</option>`).join("")}
+      </select>
+    </div>
   </div>`;
 }
 function wireHeatDragDrop(){
@@ -1204,6 +1232,29 @@ function wireHeatDragDrop(){
       ev.heats.forEach(h=>{ const idx=h.participantIds.indexOf(dragPid); if(idx>=0) h.participantIds.splice(idx,1); });
       const target = ev.heats.find(h=>h.id===toHeatId);
       target.participantIds.push(dragPid);
+      saveDB(); renderAll();
+    });
+  });
+}
+function wireAddToHeat(){
+  document.querySelectorAll(".addToHeatSelect").forEach(sel=>{
+    sel.addEventListener("change", ()=>{
+      const pid = sel.value; if(!pid) return;
+      const heatId = sel.dataset.heat;
+      const ev = curEvent();
+      pushUndo();
+      ev.heats.forEach(h=>{ const idx=h.participantIds.indexOf(pid); if(idx>=0) h.participantIds.splice(idx,1); });
+      const target = ev.heats.find(h=>h.id===heatId);
+      target.participantIds.push(pid);
+      saveDB(); renderAll();
+    });
+  });
+  document.querySelectorAll(".removeFromHeatBtn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const ev = curEvent();
+      pushUndo();
+      const h = ev.heats.find(x=>x.id===btn.dataset.heat);
+      if(h){ const idx = h.participantIds.indexOf(btn.dataset.pid); if(idx>=0) h.participantIds.splice(idx,1); }
       saveDB(); renderAll();
     });
   });
@@ -1276,8 +1327,8 @@ function openVolunteerModal(volunteer){
     <h2>${volunteer?"Edit":"Add"} Volunteer</h2>
     <div class="form-grid">
       <div class="form-row"><label>Name</label><input id="f_name" value="${esc(v.name)}"></div>
-      <div class="form-row"><label>Email</label><input id="f_email" value="${esc(v.email)}"></div>
-      <div class="form-row"><label>Phone</label><input id="f_phone" value="${esc(v.phone)}"></div>
+      <div class="form-row"><label>Email</label><input type="email" id="f_email" value="${esc(v.email)}"></div>
+      <div class="form-row"><label>Phone</label><input type="tel" id="f_phone" value="${esc(v.phone)}"></div>
       <div class="form-row"><label>Availability</label><input id="f_avail" value="${esc(v.availability)}"></div>
     </div>
     <div class="form-row"><label><input type="checkbox" id="f_participating" ${v.participating?'checked':''}> Also participating as an athlete</label></div>
@@ -1297,9 +1348,11 @@ function openVolunteerModal(volunteer){
 }
 function saveVolunteer(id){
   const ev = curEvent();
+  const emailVal = document.getElementById("f_email").value.trim();
+  if(!validEmail(emailVal)){ alert("Please enter a valid email address (e.g. name@example.com)."); return; }
   const data = {
     name: document.getElementById("f_name").value.trim(),
-    email: document.getElementById("f_email").value.trim(),
+    email: emailVal,
     phone: document.getElementById("f_phone").value.trim(),
     availability: document.getElementById("f_avail").value.trim(),
     participating: document.getElementById("f_participating").checked,
@@ -1322,6 +1375,81 @@ function deleteVolunteer(id){
 }
 
 /* =========================================================================
+   STATIONS TAB — manage the station list + manual assignment / coverage grid
+   ========================================================================= */
+function renderStationsTab(main){
+  const ev = curEvent();
+  const stations = evStations(ev);
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title"><h2>Stations</h2>${help("Manage which stations exist for this event, then use the grid below to manually assign or reassign volunteers per heat. Red cells mean nobody is covering that station yet — the system still blocks assigning a volunteer who's racing during that heat.")}</div>
+      <div class="toolbar">
+        <input id="newStationName" placeholder="New station name" style="max-width:260px;">
+        <button class="primary" id="btnAddStation">+ Add Station</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${stations.map(s=>`<span class="badge gray" style="display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 10px;">${esc(s)} <button class="small danger removeStationBtn" data-station="${esc(s)}" style="padding:1px 6px;">✕</button></span>`).join("")}
+      </div>
+    </div>
+    <div class="card table-wrap">
+      <div class="section-title"><h3>Coverage by Heat</h3>${help("One row per heat, one column per station. Pick a volunteer from each dropdown to assign them manually. Choosing '— Unassigned —' clears that slot.")}</div>
+      <table>
+        <tr><th>Time</th><th>Heat</th>${stations.map(s=>`<th>${esc(s)}</th>`).join("")}</tr>
+        ${!ev.heats.length ? `<tr><td colspan="${2+stations.length}" style="color:var(--muted);">No heats generated yet — go to Heat Generator first.</td></tr>` : ev.heats.map(h=>`<tr>
+          <td>${fmt12(h.time)}</td>
+          <td>${esc(h.division)} · ${h.heatNumberInDivision}</td>
+          ${stations.map(s=>{
+            const a = ev.stationAssignments.find(x=>x.heatId===h.id && x.station===s);
+            return `<td><select class="stationSelect" data-heat="${h.id}" data-station="${esc(s)}" style="${a?'':'border-color:var(--red);background:var(--red-bg);'}">
+              <option value="">— Unassigned —</option>
+              ${ev.volunteers.map(v=>`<option value="${v.id}" ${a&&a.volunteerId===v.id?'selected':''}>${esc(v.name)}</option>`).join("")}
+            </select></td>`;
+          }).join("")}
+        </tr>`).join("")}
+      </table>
+    </div>
+  `;
+  const addBtn = document.getElementById("btnAddStation");
+  if(addBtn) addBtn.addEventListener("click", ()=>{
+    const input = document.getElementById("newStationName");
+    const name = input.value.trim();
+    if(!name) return;
+    if(evStations(ev).some(s=>s.toLowerCase()===name.toLowerCase())){ alert("That station already exists."); return; }
+    pushUndo();
+    if(!ev.stations || !ev.stations.length) ev.stations = DEFAULT_STATIONS.slice();
+    ev.stations.push(name);
+    saveDB(); renderAll();
+  });
+  document.querySelectorAll(".removeStationBtn").forEach(b=>{
+    b.addEventListener("click", ()=> removeStation(b.dataset.station));
+  });
+  document.querySelectorAll(".stationSelect").forEach(sel=>{
+    sel.addEventListener("change", ()=>{
+      manualAssignStation(sel.dataset.heat, sel.dataset.station, sel.value);
+    });
+  });
+}
+function removeStation(name){
+  if(!confirm(`Remove station "${name}"? Any existing assignments to it will be cleared.`)) return;
+  const ev = curEvent();
+  pushUndo();
+  ev.stations = evStations(ev).filter(s=>s!==name);
+  ev.stationAssignments = ev.stationAssignments.filter(a=>a.station!==name);
+  saveDB(); renderAll();
+}
+function manualAssignStation(heatId, station, volId){
+  const ev = curEvent();
+  if(!volId){
+    pushUndo();
+    ev.stationAssignments = ev.stationAssignments.filter(a=>!(a.heatId===heatId && a.station===station));
+    saveDB(); renderAll();
+    return;
+  }
+  assignStation(ev, heatId, station, volId);
+  renderAll();
+}
+
+/* =========================================================================
    EVENT SCHEDULE (full synchronized view)
    ========================================================================= */
 let scheduleFilters = {division:"", volunteer:"", station:"", search:""};
@@ -1335,7 +1463,7 @@ function renderSchedule(main){
       <div class="spacer"></div>
       <select id="filterDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${scheduleFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
       <select id="filterVolunteer"><option value="">All Volunteers</option>${ev.volunteers.map(v=>`<option value="${v.id}" ${scheduleFilters.volunteer===v.id?'selected':''}>${esc(v.name)}</option>`).join("")}</select>
-      <select id="filterStation"><option value="">All Stations</option>${STATIONS.map(s=>`<option ${scheduleFilters.station===s?'selected':''}>${s}</option>`).join("")}</select>
+      <select id="filterStation"><option value="">All Stations</option>${evStations(ev).map(s=>`<option ${scheduleFilters.station===s?'selected':''}>${s}</option>`).join("")}</select>
       <button class="small" onclick="window.print()">🖨 Print</button>
     </div>
     <div class="card table-wrap" id="scheduleTableWrap"></div>
@@ -1358,16 +1486,20 @@ function renderScheduleTable(ev){
     <tr><th>Time</th><th>Division / Heat</th><th>Participants</th><th>Station Assignments</th></tr>
     ${heats.map(h=>{
       const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
-      let assigns = ev.stationAssignments.filter(a=>a.heatId===h.id);
-      if(scheduleFilters.station) assigns = assigns.filter(a=>a.station===scheduleFilters.station);
-      if(scheduleFilters.volunteer) assigns = assigns.filter(a=>a.volunteerId===scheduleFilters.volunteer);
-      if(scheduleFilters.volunteer && !assigns.length) return "";
+      const heatAssigns = ev.stationAssignments.filter(a=>a.heatId===h.id);
+      if(scheduleFilters.volunteer && !heatAssigns.some(a=>a.volunteerId===scheduleFilters.volunteer)) return "";
       if(scheduleFilters.search && !(h.division+parts.map(fullName).join(" ")).toLowerCase().includes(scheduleFilters.search)) return "";
+      const displayStations = scheduleFilters.station ? [scheduleFilters.station] : evStations(ev);
       return `<tr>
         <td>${fmt12(h.time)}</td>
         <td>${esc(h.division)} · Heat ${h.heatNumberInDivision}</td>
-        <td>${parts.map(p=>esc(p.division.indexOf("Doubles")!==-1||p.division==="Relay"?(p.teamName||fullName(p)):fullName(p))).join(", ")}</td>
-        <td>${assigns.map(a=>{const v=ev.volunteers.find(x=>x.id===a.volunteerId); return `<span class="badge gray">${a.station}: ${v?esc(v.name):"?"}</span>`;}).join(" ")}</td>
+        <td>${parts.map(p=>esc(teamLabel(p))).join(", ")}</td>
+        <td>${displayStations.map(s=>{
+          let a = heatAssigns.find(x=>x.station===s);
+          if(a && scheduleFilters.volunteer && a.volunteerId!==scheduleFilters.volunteer) a = null;
+          const v = a ? ev.volunteers.find(x=>x.id===a.volunteerId) : null;
+          return `<span class="badge ${v?'gray':'red'}">${esc(s)}: ${v?esc(v.name):'empty'}</span>`;
+        }).join(" ")}</td>
       </tr>`;
     }).join("")}
   </table>`;
