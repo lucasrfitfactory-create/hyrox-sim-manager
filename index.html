@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>HYROX Simulation Manager — Fit Factory</title>
+<style>
+:root{
+  --bg:#0d1117; --bg2:#151b23; --bg3:#1c2530; --border:#2a3441; --text:#e6edf3; --muted:#8b96a5;
+  --accent:#ff5b2e; --accent2:#3b9dff; --green:#2ea043; --orange:#d29922; --red:#f85149;
+  --green-bg:rgba(46,160,67,.15); --orange-bg:rgba(210,153,34,.15); --red-bg:rgba(248,81,73,.15);
+  --radius:10px; --shadow:0 2px 10px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+body{min-height:100vh;}
+a{color:var(--accent2);}
+button, input, select, textarea{font-family:inherit;font-size:14px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
+button{cursor:pointer;transition:.15s;}
+button:hover{border-color:var(--accent);}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+button.primary:hover{opacity:.9;}
+button.ghost{background:transparent;}
+button.danger{border-color:var(--red);color:var(--red);}
+button.small{padding:4px 8px;font-size:12px;border-radius:6px;}
+input[type=checkbox]{width:16px;height:16px;padding:0;}
+h1,h2,h3,h4{margin:0 0 8px 0;font-weight:700;}
+.hidden{display:none !important;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;}
+
+/* ===== Login / Role Screen ===== */
+#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.login-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:36px;max-width:440px;width:100%;box-shadow:var(--shadow);text-align:center;}
+.login-card h1{font-size:24px;margin-bottom:4px;}
+.login-card p{color:var(--muted);margin-bottom:24px;}
+.role-btns{display:flex;gap:12px;margin-bottom:18px;}
+.role-btns button{flex:1;padding:16px;font-size:15px;border-radius:12px;}
+#volunteerPicker{margin-top:12px;text-align:left;}
+#volunteerPicker select{width:100%;margin-top:8px;}
+
+/* ===== App Shell ===== */
+#appShell{display:none;flex-direction:column;min-height:100vh;}
+header.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:50;}
+.brand{font-weight:800;letter-spacing:.5px;color:var(--accent);white-space:nowrap;}
+.event-switcher{display:flex;align-items:center;gap:6px;}
+.event-switcher select{max-width:220px;}
+#globalSearch{flex:1;min-width:140px;max-width:320px;}
+.spacer{flex:1;}
+.role-badge{padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;background:var(--accent);color:#fff;}
+.role-badge.volunteer{background:var(--accent2);}
+nav.tabs{display:flex;gap:2px;background:var(--bg2);border-bottom:1px solid var(--border);overflow-x:auto;padding:0 8px;}
+nav.tabs button{background:transparent;border:none;border-bottom:3px solid transparent;border-radius:0;padding:12px 16px;color:var(--muted);font-weight:600;white-space:nowrap;}
+nav.tabs button.active{color:var(--text);border-bottom-color:var(--accent);}
+main{flex:1;padding:18px;max-width:1400px;width:100%;margin:0 auto;}
+footer.statusbar{padding:6px 16px;font-size:11px;color:var(--muted);border-top:1px solid var(--border);display:flex;justify-content:space-between;}
+
+/* ===== Help tooltip ===== */
+.help{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;cursor:help;position:relative;margin-left:6px;vertical-align:middle;}
+.help:hover, .help.open{background:var(--accent2);color:#fff;border-color:var(--accent2);}
+.help .tip{display:none;position:absolute;z-index:200;top:22px;left:0;background:#0a0f14;border:1px solid var(--accent2);color:var(--text);padding:10px 12px;border-radius:8px;width:240px;font-size:12px;font-weight:400;line-height:1.4;box-shadow:var(--shadow);}
+.help:hover .tip, .help.open .tip{display:block;}
+.section-title{display:flex;align-items:center;gap:4px;margin-bottom:12px;}
+
+/* ===== Cards / layout ===== */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px;}
+.grid{display:grid;gap:14px;}
+.grid.cols-4{grid-template-columns:repeat(4,1fr);}
+.grid.cols-3{grid-template-columns:repeat(3,1fr);}
+.grid.cols-2{grid-template-columns:repeat(2,1fr);}
+@media(max-width:900px){.grid.cols-4{grid-template-columns:repeat(2,1fr);} .grid.cols-3{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:600px){.grid.cols-4,.grid.cols-3,.grid.cols-2{grid-template-columns:1fr;}}
+.stat{background:var(--bg3);border-radius:10px;padding:14px;border:1px solid var(--border);}
+.stat .num{font-size:26px;font-weight:800;}
+.stat .label{color:var(--muted);font-size:12px;margin-top:2px;}
+.stat.green{border-color:var(--green);background:var(--green-bg);}
+.stat.orange{border-color:var(--orange);background:var(--orange-bg);}
+.stat.red{border-color:var(--red);background:var(--red-bg);}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;}
+.badge.green{background:var(--green-bg);color:var(--green);}
+.badge.orange{background:var(--orange-bg);color:var(--orange);}
+.badge.red{background:var(--red-bg);color:var(--red);}
+.badge.gray{background:var(--bg3);color:var(--muted);}
+.warn-list{display:flex;flex-direction:column;gap:8px;}
+.warn-item{padding:10px 12px;border-radius:8px;font-size:13px;display:flex;gap:8px;align-items:flex-start;}
+.warn-item.red{background:var(--red-bg);border:1px solid var(--red);}
+.warn-item.orange{background:var(--orange-bg);border:1px solid var(--orange);}
+.warn-item.green{background:var(--green-bg);border:1px solid var(--green);}
+
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;}
+th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.3px;}
+tr:hover td{background:var(--bg3);}
+.table-wrap{overflow-x:auto;}
+
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+.toolbar .spacer{flex:1;}
+
+.pill-toggle{display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+.pill-toggle button{border:none;border-radius:0;background:transparent;padding:6px 12px;}
+.pill-toggle button.active{background:var(--accent);color:#fff;}
+
+.modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;align-items:center;justify-content:center;padding:16px;}
+.modal-backdrop.open{display:flex;}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:22px;max-width:560px;width:100%;max-height:88vh;overflow-y:auto;}
+.modal h2{margin-bottom:16px;}
+.form-row{margin-bottom:12px;}
+.form-row label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+.form-row input, .form-row select, .form-row textarea{width:100%;}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media(max-width:520px){.form-grid{grid-template-columns:1fr;}}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;}
+.checks{display:flex;flex-wrap:wrap;gap:12px;}
+.checks label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);font-weight:400;}
+
+.sponsor-card{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.sponsor-card .name{font-weight:700;font-size:15px;}
+.sponsor-card .meta{color:var(--muted);font-size:12px;margin:4px 0 10px;}
+.sponsor-card .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+
+.heat-col{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px;min-width:220px;}
+.heat-schedule{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;}
+.heat-header{font-weight:700;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;}
+.heat-time{color:var(--accent2);font-size:12px;}
+.participant-chip{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:6px 8px;margin-bottom:6px;font-size:12px;cursor:grab;display:flex;justify-content:space-between;gap:6px;align-items:center;}
+.participant-chip.locked{border-color:var(--accent);}
+.participant-chip.dragover{border-color:var(--accent2);}
+.participant-chip .tag{font-size:9px;padding:1px 5px;border-radius:8px;background:var(--bg3);color:var(--muted);}
+.heat-col.dragover{border-color:var(--accent2);background:rgba(59,157,255,.08);}
+
+.timeline{position:relative;height:60px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);margin-top:8px;overflow:hidden;}
+.timeline .block{position:absolute;top:6px;bottom:6px;border-radius:5px;font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 4px;white-space:nowrap;}
+.timeline .hourmark{position:absolute;top:0;bottom:0;border-left:1px dashed rgba(255,255,255,.15);font-size:9px;color:var(--muted);padding-left:2px;}
+
+/* Mobile volunteer view */
+#mobileView{max-width:480px;margin:0 auto;}
+.mv-hero{background:linear-gradient(135deg,var(--accent),#a53a1a);border-radius:16px;padding:22px;margin-bottom:16px;text-align:center;}
+.mv-hero h2{margin:0;font-size:20px;}
+.mv-hero .sub{opacity:.85;font-size:13px;margin-top:4px;}
+.mv-block{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px;display:flex;gap:14px;align-items:center;}
+.mv-block .icon{font-size:28px;width:44px;text-align:center;}
+.mv-block .big{font-size:20px;font-weight:800;}
+.mv-block .lbl{color:var(--muted);font-size:12px;}
+
+@media(max-width:700px){
+  nav.tabs{font-size:13px;}
+  .grid.cols-4, .grid.cols-3, .grid.cols-2{grid-template-columns:1fr;}
+  header.topbar{padding:8px 10px;}
+  main{padding:10px;}
+}
+
+@media print{
+  header.topbar, nav.tabs, footer.statusbar, .no-print{display:none !important;}
+  body{background:#fff;color:#000;}
+  .card{border:1px solid #999;}
+  table th, table td{color:#000;border-color:#999;}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN SCREEN ================= -->
+<div id="loginScreen">
+  <div class="login-card">
+    <h1>🏋️ HYROX Simulation Manager</h1>
+    <p>Fit Factory — recurring event operations hub</p>
+    <div class="role-btns">
+      <button class="primary" id="btnAdminLogin">Admin</button>
+      <button id="btnVolunteerLogin">Volunteer</button>
+    </div>
+    <div id="adminPasswordPrompt" class="hidden" style="margin-top:12px;text-align:left;">
+      <label style="font-size:12px;color:var(--muted);font-weight:600;">Enter admin password</label>
+      <input type="password" id="adminPasswordInput" placeholder="Password" style="width:100%;margin-top:6px;" autocomplete="current-password">
+      <button class="primary" style="width:100%;margin-top:10px;" id="btnAdminContinue">Continue</button>
+      <div id="adminPasswordError" style="color:var(--red);font-size:12px;margin-top:8px;display:none;">Incorrect password. Try again.</div>
+    </div>
+    <div id="volunteerPicker" class="hidden">
+      <label style="font-size:12px;color:var(--muted);font-weight:600;">Select your name</label>
+      <select id="volunteerSelect"></select>
+      <button class="primary" style="width:100%;margin-top:10px;" id="btnVolunteerContinue">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= APP SHELL ================= -->
+<div id="appShell">
+  <header class="topbar">
+    <div class="brand">HYROX SIM</div>
+    <div class="event-switcher">
+      <select id="eventSelect"></select>
+      <button class="small" id="btnNewEvent" title="Create new event">+ New</button>
+    </div>
+    <input id="globalSearch" placeholder="Search everywhere… (press /)" class="no-print">
+    <div class="spacer"></div>
+    <span id="roleBadge" class="role-badge">ADMIN</span>
+    <button class="small ghost" id="btnSwitchUser">Switch user</button>
+  </header>
+
+  <nav class="tabs" id="tabsNav"></nav>
+
+  <main id="mainContent"></main>
+
+  <footer class="statusbar">
+    <span id="saveStatus">All changes saved</span>
+    <span>Fit Factory HYROX Simulation Manager · Ctrl+Z undo · press "/" to search</span>
+  </footer>
+</div>
+
+<!-- ================= MODAL ================= -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal" id="modalBody"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<!-- Firebase (cloud sync so admin + all volunteers see the same live data across devices) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+"use strict";
+/* =========================================================================
+   CONSTANTS
+   ========================================================================= */
+const DIVISIONS = ["Men's Doubles","Mixed Doubles","Women's Doubles","Men's Solo","Women's Solo","Relay"];
+const CAPACITY = {"Men's Solo":2,"Women's Solo":2,"Men's Doubles":2,"Mixed Doubles":2,"Women's Doubles":2,"Relay":1};
+const STATIONS = ["SkiErg","Sled Push","Sled Pull","Burpee Broad Jumps","RowErg","Farmer's Carry","Sandbag Lunges","Wall Balls"];
+const ROLE_SLOTS = {"Front Desk":2,"Heat Starter":1,"Hydration Station":2};
+const SPONSOR_STATUSES = ["Waiting for response","Confirmed","Declined"];
+const PAYMENT_STATUSES = ["Paid","Pending","Complimentary"];
+const CONSTRAINT_TYPES = [
+  {v:"mustBefore", label:"Must race before…", needsTime:true},
+  {v:"cannotBefore", label:"Cannot race before…", needsTime:true},
+  {v:"afterAthlete", label:"Must race after another athlete", needsAthlete:true},
+  {v:"vip", label:"VIP"},
+  {v:"manualLock", label:"Manual lock (fixed heat)"}
+];
+const STORE_KEY = "hyroxSimApp_v1";
+
+/* Admin password. Change this string to update the password. */
+const ADMIN_PASSWORD = "lucas08";
+
+/* =========================================================================
+   CLOUD SYNC (Firebase Firestore)
+   Paste your Firebase project config below to enable real-time sync across
+   every device (admin laptop + every volunteer's phone). Get these values
+   from: Firebase Console > Project Settings > General > Your apps > SDK
+   setup and configuration > Config. These values are NOT secret — they are
+   meant to be public in client-side code; access is controlled by Firestore
+   Security Rules, not by hiding this object.
+   Until you fill this in, the app still works, but only on a single device
+   (data is stored in that browser's local storage only).
+   ========================================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyAvhE37xXxtzz6NC0PGevNulhEuY4e84fE",
+  authDomain: "hyrox-sim-manager.firebaseapp.com",
+  projectId: "hyrox-sim-manager",
+  storageBucket: "hyrox-sim-manager.firebasestorage.app",
+  messagingSenderId: "360766183862",
+  appId: "1:360766183862:web:c4e4952252a5b0f200c917"
+};
+const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
+let cloudDocRef = null;
+let applyingRemoteUpdate = false;
+if(CLOUD_ENABLED){
+  try{
+    firebase.initializeApp(firebaseConfig);
+    cloudDocRef = firebase.firestore().collection("hyroxSim").doc("sharedState");
+  }catch(e){ console.error("Firebase init failed", e); }
+}
+function updateSyncBadge(text){
+  const el = document.getElementById("saveStatus");
+  if(el) el.textContent = text;
+}
+function initCloudSync(){
+  if(!CLOUD_ENABLED || !cloudDocRef) { updateSyncBadge("Local device only — cloud sync not configured"); return; }
+  updateSyncBadge("Connecting to cloud…");
+  cloudDocRef.get().then(snap=>{
+    if(snap.exists && snap.data() && snap.data().events){
+      applyingRemoteUpdate = true;
+      DB.events = snap.data().events;
+      if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
+      applyingRemoteUpdate = false;
+      try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
+      renderAll();
+    } else {
+      // First device to connect seeds the cloud with whatever is stored locally.
+      cloudDocRef.set({events: DB.events, updatedAt: firebase.firestore.FieldValue.serverTimestamp()});
+    }
+    updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
+    cloudDocRef.onSnapshot(snap=>{
+      if(!snap.exists) return;
+      const data = snap.data();
+      if(!data || !data.events) return;
+      applyingRemoteUpdate = true;
+      DB.events = data.events;
+      if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
+      applyingRemoteUpdate = false;
+      try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
+      updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
+      renderAll();
+    }, err=>{
+      console.error("Firestore listen failed", err);
+      updateSyncBadge("Cloud sync error — check Firestore rules/connection");
+    });
+  }).catch(err=>{
+    console.error("Firestore init failed", err);
+    updateSyncBadge("Cloud sync error — using local storage only");
+  });
+}
+
+/* =========================================================================
+   UTILITIES
+   ========================================================================= */
+function uid(){ return Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4); }
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+function timeToMin(t){ const [h,m]=t.split(":").map(Number); return h*60+m; }
+function minToTime(m){ m=((m%1440)+1440)%1440; const h=Math.floor(m/60), mm=m%60; return String(h).padStart(2,"0")+":"+String(mm).padStart(2,"0"); }
+function addMinutes(t,mins){ return minToTime(timeToMin(t)+mins); }
+function fmt12(t){ const [h,m]=t.split(":").map(Number); const ap=h>=12?"PM":"AM"; let hh=h%12; if(hh===0)hh=12; return hh+":"+String(m).padStart(2,"0")+" "+ap; }
+function debounce(fn,ms){ let tId; return (...a)=>{ clearTimeout(tId); tId=setTimeout(()=>fn(...a),ms); }; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function download(filename, text){
+  const blob = new Blob([text], {type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  URL.revokeObjectURL(a.href);
+}
+function fullName(p){ return (p.firstName||"")+" "+(p.lastName||""); }
+
+/* =========================================================================
+   STATE / PERSISTENCE
+   ========================================================================= */
+let DB = null;
+let undoStack = [];
+let currentTab = "dashboard";
+let saveTimer = null;
+
+function defaultEvent(name, dateStr){
+  return {
+    id: uid(), name: name, date: dateStr,
+    startTime: "08:00", heatInterval: 10, raceDuration: 100,
+    sponsors: [], volunteers: [], participants: [], heats: [],
+    stationAssignments: [], roleAssignments: [],
+    createdAt: Date.now()
+  };
+}
+
+function loadDB(){
+  let raw = null;
+  try{ raw = localStorage.getItem(STORE_KEY); }catch(e){}
+  if(raw){
+    try{ DB = JSON.parse(raw); }catch(e){ DB = null; }
+  }
+  if(!DB){
+    const ev = defaultEvent("HYROX Simulation — August 9", "2026-08-09");
+    seedDemoData(ev);
+    DB = { events: {[ev.id]: ev}, currentEventId: ev.id, role: null, currentVolunteerId: null };
+  }
+}
+function saveDB(immediate, skipCloud){
+  clearTimeout(saveTimer);
+  const doSave = ()=>{
+    try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
+    if(CLOUD_ENABLED && cloudDocRef && !skipCloud && !applyingRemoteUpdate){
+      updateSyncBadge("Syncing…");
+      cloudDocRef.set({events: DB.events, updatedAt: firebase.firestore.FieldValue.serverTimestamp()})
+        .then(()=> updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString()))
+        .catch(()=> updateSyncBadge("Cloud sync failed — check connection (saved locally)"));
+    } else if(!CLOUD_ENABLED){
+      updateSyncBadge("Saved locally · " + new Date().toLocaleTimeString());
+    }
+  };
+  if(!CLOUD_ENABLED) updateSyncBadge("Saving…");
+  if(immediate){ doSave(); } else { saveTimer = setTimeout(doSave, 400); }
+}
+function pushUndo(){
+  undoStack.push(clone(DB.events[DB.currentEventId]));
+  if(undoStack.length>40) undoStack.shift();
+}
+function undo(){
+  if(!undoStack.length) return;
+  DB.events[DB.currentEventId] = undoStack.pop();
+  saveDB(); renderAll();
+}
+function curEvent(){ return DB.events[DB.currentEventId]; }
+
+function seedDemoData(ev){
+  const sponsors = [
+    {company:"Iron Grip Supplements", contact:"Dana Wells", email:"dana@irongrip.com", phone:"555-201-3344", status:"Confirmed", shipped:true, received:true, boothConfirmed:true, logoReceived:true, notes:"Bringing banner + samples."},
+    {company:"Peak Performance PT", contact:"Marcus Diaz", email:"marcus@peakpt.com", phone:"555-982-1120", status:"Waiting for response", shipped:false, received:false, boothConfirmed:false, logoReceived:false, notes:""},
+    {company:"CoolFlow Hydration", contact:"Rita Kim", email:"rita@coolflow.com", phone:"555-410-7788", status:"Confirmed", shipped:true, received:false, boothConfirmed:true, logoReceived:true, notes:"Sending cooler + cups."}
+  ];
+  sponsors.forEach(s=> ev.sponsors.push(Object.assign({id:uid()},s)));
+
+  const volunteers = [
+    {name:"Alex Turner", email:"alex@example.com", phone:"555-111-2222", availability:"Full day", notes:"", participating:false},
+    {name:"Jamie Ruiz", email:"jamie@example.com", phone:"555-333-4444", availability:"Full day", notes:"Prefers morning stations", participating:true},
+    {name:"Morgan Lee", email:"morgan@example.com", phone:"555-555-6666", availability:"Full day", notes:"", participating:false},
+    {name:"Casey Brooks", email:"casey@example.com", phone:"555-777-8888", availability:"After 9am", notes:"", participating:false},
+    {name:"Taylor Nguyen", email:"taylor@example.com", phone:"555-999-0000", availability:"Full day", notes:"", participating:false}
+  ];
+  volunteers.forEach(v=> ev.volunteers.push(Object.assign({id:uid()},v)));
+
+  const demoP = [
+    ["John","Miller","Member","Men's Solo"],["Steve","Adams","Non-member","Men's Solo"],
+    ["Kelly","Fox","Member","Women's Solo"],["Nina","Ross","Member","Women's Solo"],
+    ["Tom","Reed","Member","Men's Doubles"],["Sam","Cole","Member","Men's Doubles"],
+    ["Amy","Diaz","Member","Mixed Doubles"],["Ben","Diaz","Member","Mixed Doubles"],
+    ["Lisa","Ford","Non-member","Women's Doubles"],["Mia","Park","Non-member","Women's Doubles"]
+  ];
+  demoP.forEach(([f,l,mem,div])=>{
+    ev.participants.push({
+      id: uid(), firstName:f, lastName:l, email:(f+"."+l+"@example.com").toLowerCase(), phone:"555-000-0000",
+      memberStatus: mem, division: div, teamName:"", partnerNames:"", constraints:[],
+      priceOverride:null, discount:0, paymentStatus:"Paid"
+    });
+  });
+}
+
+/* =========================================================================
+   PRICING
+   ========================================================================= */
+function standardPrice(p){
+  const member = p.memberStatus === "Member";
+  if(p.division === "Relay") return 100;
+  if(p.division.indexOf("Solo") !== -1) return member ? 30 : 60;
+  // Doubles / Mixed Doubles record represents a full team entry
+  return member ? 60 : 120;
+}
+function actualPrice(p){
+  if(p.paymentStatus === "Complimentary") return 0;
+  if(p.priceOverride !== null && p.priceOverride !== undefined && p.priceOverride !== "") return Number(p.priceOverride);
+  return standardPrice(p) - (Number(p.discount)||0);
+}
+function collectedAmount(p){
+  if(p.paymentStatus === "Paid") return actualPrice(p);
+  if(p.paymentStatus === "Complimentary") return 0;
+  return 0; // pending -> not yet collected
+}
+
+/* =========================================================================
+   HEAT GENERATION & CONSTRAINTS
+   ========================================================================= */
+function generateHeats(ev){
+  pushUndo();
+  const groups = {};
+  DIVISIONS.forEach(d=> groups[d] = ev.participants.filter(p=>p.division===d));
+
+  // Pull out manual-lock participants first (they get placed after generic layout, by heat index within division)
+  let heats = [];
+  let curTime = ev.startTime;
+  DIVISIONS.forEach(div=>{
+    const cap = CAPACITY[div];
+    let list = groups[div].slice();
+
+    // Soft ordering heuristic: mustBefore earlier, cannotBefore later, keep stable otherwise
+    list.sort((a,b)=>{
+      const score = p => {
+        const c = (p.constraints||[]);
+        if(c.some(x=>x.type==="mustBefore")) return -1;
+        if(c.some(x=>x.type==="cannotBefore")) return 1;
+        return 0;
+      };
+      return score(a)-score(b);
+    });
+
+    const numHeats = Math.ceil(list.length/cap) || 0;
+    for(let h=0; h<numHeats; h++){
+      const slice = list.slice(h*cap, h*cap+cap);
+      heats.push({
+        id: uid(), division: div, heatNumberInDivision: h+1,
+        time: curTime, participantIds: slice.map(p=>p.id)
+      });
+      curTime = addMinutes(curTime, ev.heatInterval);
+    }
+  });
+
+  // afterAthlete pass: try to swap so participant's heat index > referenced athlete's heat index
+  function heatIndexOf(pid){ return heats.findIndex(h=>h.participantIds.includes(pid)); }
+  ev.participants.forEach(p=>{
+    (p.constraints||[]).forEach(c=>{
+      if(c.type==="afterAthlete" && c.athleteId){
+        const myIdx = heatIndexOf(p.id);
+        const refIdx = heatIndexOf(c.athleteId);
+        if(myIdx>=0 && refIdx>=0 && myIdx<=refIdx){
+          // try find a later heat in same division with a swappable, non-locked participant
+          const div = p.division;
+          for(let i=heats.length-1;i>refIdx;i--){
+            if(heats[i].division!==div) continue;
+            const idx = heats[i].participantIds.indexOf(undefined); // no-op, placeholder
+          }
+          // simplest: try swapping p into the heat immediately after refIdx among same-division heats
+          const candidates = heats.map((h,i)=>({h,i})).filter(o=>o.h.division===div && o.i>refIdx);
+          if(candidates.length){
+            const target = candidates[0];
+            const myHeat = heats[myIdx];
+            const pos1 = myHeat.participantIds.indexOf(p.id);
+            const pos2 = target.h.participantIds.length>0 ? 0 : -1;
+            if(pos2>=0 && target.i!==myIdx){
+              const other = target.h.participantIds[0];
+              target.h.participantIds[0] = p.id;
+              myHeat.participantIds[pos1] = other;
+            }
+          }
+        }
+      }
+    });
+  });
+
+  // manualLock / fixedHeat: honor explicit heatId if participant has one already assigned
+  ev.participants.forEach(p=>{
+    (p.constraints||[]).forEach(c=>{
+      if(c.type==="manualLock" && c.heatId){
+        const targetHeat = heats.find(h=>h.id===c.heatId || (h.division===p.division && h.heatNumberInDivision===c.heatNumber));
+        if(targetHeat && !targetHeat.participantIds.includes(p.id)){
+          // remove from wherever it is, push into target
+          heats.forEach(h=>{ const idx=h.participantIds.indexOf(p.id); if(idx>=0) h.participantIds.splice(idx,1); });
+          targetHeat.participantIds.push(p.id);
+        }
+      }
+    });
+  });
+
+  ev.heats = heats;
+  // clear station assignments referencing removed heats
+  ev.stationAssignments = ev.stationAssignments.filter(a=> heats.some(h=>h.id===a.heatId));
+}
+
+function validateConstraints(ev){
+  const violations = [];
+  const heatOf = pid => ev.heats.find(h=>h.participantIds.includes(pid));
+  ev.participants.forEach(p=>{
+    const h = heatOf(p.id);
+    (p.constraints||[]).forEach(c=>{
+      if(c.type==="mustBefore" && c.time){
+        if(!h) { violations.push({level:"red", msg:`${fullName(p)} has a "must race before ${c.time}" constraint but is not scheduled in any heat.`}); }
+        else if(timeToMin(h.time) >= timeToMin(c.time)){
+          violations.push({level:"red", msg:`${fullName(p)} must race before ${fmt12(c.time)} but is scheduled at ${fmt12(h.time)}.`});
+        }
+      }
+      if(c.type==="cannotBefore" && c.time){
+        if(h && timeToMin(h.time) < timeToMin(c.time)){
+          violations.push({level:"red", msg:`${fullName(p)} cannot race before ${fmt12(c.time)} but is scheduled at ${fmt12(h.time)}.`});
+        }
+      }
+      if(c.type==="afterAthlete" && c.athleteId){
+        const ref = ev.participants.find(x=>x.id===c.athleteId);
+        const refHeat = ref?heatOf(ref.id):null;
+        if(h && refHeat && timeToMin(h.time) <= timeToMin(refHeat.time)){
+          violations.push({level:"orange", msg:`${fullName(p)} should race after ${ref?fullName(ref):"referenced athlete"}, but is not scheduled later.`});
+        }
+      }
+    });
+  });
+  return violations;
+}
+
+/* =========================================================================
+   VOLUNTEER AVAILABILITY / ASSIGNMENTS
+   ========================================================================= */
+function volunteerParticipant(ev, vol){
+  return vol.participantId ? ev.participants.find(p=>p.id===vol.participantId) : null;
+}
+function volunteerHeat(ev, vol){
+  const p = volunteerParticipant(ev, vol);
+  if(!p) return null;
+  return ev.heats.find(h=>h.participantIds.includes(p.id));
+}
+function getUnavailability(ev, vol){
+  if(!vol.participating) return null;
+  const heat = volunteerHeat(ev, vol);
+  if(!heat) return null;
+  const start = addMinutes(heat.time, -20);
+  const end = addMinutes(heat.time, ev.raceDuration);
+  return {start, end, raceTime:heat.time, heat};
+}
+function timeOverlaps(t, start, end){
+  const tm=timeToMin(t), s=timeToMin(start), e=timeToMin(end);
+  return tm>=s && tm<e;
+}
+function canAssignVolunteer(ev, volId, heatId){
+  const vol = ev.volunteers.find(v=>v.id===volId);
+  if(!vol) return {ok:false, reason:"Volunteer not found."};
+  const unavail = getUnavailability(ev, vol);
+  if(!unavail) return {ok:true};
+  const heat = ev.heats.find(h=>h.id===heatId);
+  if(!heat) return {ok:true};
+  if(timeOverlaps(heat.time, unavail.start, unavail.end)){
+    return {ok:false, reason: `${vol.name} is racing at ${fmt12(unavail.raceTime)} and unavailable from ${fmt12(unavail.start)} to ${fmt12(unavail.end)}. Cannot assign to a station during this window.`};
+  }
+  return {ok:true};
+}
+function assignStation(ev, heatId, station, volId){
+  const check = canAssignVolunteer(ev, volId, heatId);
+  if(!check.ok){ alert("⚠️ Assignment blocked:\n\n"+check.reason); return false; }
+  // ensure volunteer isn't already assigned to a different station in this same heat
+  const dupe = ev.stationAssignments.find(a=>a.heatId===heatId && a.volunteerId===volId && a.station!==station);
+  if(dupe){ alert("⚠️ "+ev.volunteers.find(v=>v.id===volId).name+" is already assigned to "+dupe.station+" for this heat."); return false; }
+  pushUndo();
+  let a = ev.stationAssignments.find(x=>x.heatId===heatId && x.station===station);
+  if(a){ a.volunteerId = volId; } else { ev.stationAssignments.push({id:uid(), heatId, station, volunteerId:volId}); }
+  saveDB(); return true;
+}
+function autoAssignStations(ev){
+  pushUndo();
+  let rotation = ev.volunteers.map(v=>v.id);
+  let ptr = 0;
+  ev.heats.forEach(heat=>{
+    STATIONS.forEach(station=>{
+      let existing = ev.stationAssignments.find(a=>a.heatId===heat.id && a.station===station);
+      if(existing) return;
+      let tries = 0; let placed=false;
+      while(tries < rotation.length){
+        const candidate = rotation[ptr % rotation.length];
+        ptr++; tries++;
+        const alreadyThisHeat = ev.stationAssignments.some(a=>a.heatId===heat.id && a.volunteerId===candidate);
+        if(alreadyThisHeat) continue;
+        const check = canAssignVolunteer(ev, candidate, heat.id);
+        if(check.ok){
+          ev.stationAssignments.push({id:uid(), heatId:heat.id, station, volunteerId:candidate});
+          placed = true; break;
+        }
+      }
+      // if not placed, leave empty -> will show as "empty station" warning
+    });
+  });
+  saveDB();
+}
+
+/* =========================================================================
+   SMART DETECTION
+   ========================================================================= */
+function detectDuplicateParticipants(ev){
+  const seen = {}; const dupes = [];
+  ev.participants.forEach(p=>{
+    const key = (p.firstName+"|"+p.lastName+"|"+p.email).toLowerCase();
+    if(seen[key]) dupes.push(p); else seen[key]=p;
+  });
+  return dupes;
+}
+function detectEmptyStations(ev){
+  const empties = [];
+  ev.heats.forEach(h=>{
+    STATIONS.forEach(st=>{
+      if(!ev.stationAssignments.some(a=>a.heatId===h.id && a.station===st)){
+        empties.push({heat:h, station:st});
+      }
+    });
+  });
+  return empties;
+}
+function detectIncompleteHeats(ev){
+  return ev.heats.filter(h=> h.participantIds.length < CAPACITY[h.division]);
+}
+function detectVolunteerConflicts(ev){
+  const conflicts = [];
+  ev.stationAssignments.forEach(a=>{
+    const check = canAssignVolunteer(ev, a.volunteerId, a.heatId);
+    if(!check.ok) conflicts.push({assignment:a, reason:check.reason});
+  });
+  return conflicts;
+}
+function detectMissingVolunteerCoverage(ev){
+  const need = ev.heats.length * STATIONS.length;
+  const have = ev.stationAssignments.length;
+  return {need, have, missing: Math.max(0, need-have)};
+}
+
+/* =========================================================================
+   HELP TOOLTIP
+   ========================================================================= */
+function help(text){
+  return `<span class="help" tabindex="0" onclick="this.classList.toggle('open')">?<span class="tip">${esc(text)}</span></span>`;
+}
+document.addEventListener("click", (e)=>{
+  document.querySelectorAll(".help.open").forEach(h=>{ if(!h.contains(e.target)) h.classList.remove("open"); });
+});
+
+/* =========================================================================
+   MODAL HELPERS
+   ========================================================================= */
+function openModal(html){
+  document.getElementById("modalBody").innerHTML = html;
+  document.getElementById("modalBackdrop").classList.add("open");
+}
+function closeModal(){ document.getElementById("modalBackdrop").classList.remove("open"); }
+document.getElementById("modalBackdrop").addEventListener("click", e=>{ if(e.target.id==="modalBackdrop") closeModal(); });
+
+/* =========================================================================
+   RENDER: ROOT
+   ========================================================================= */
+const TABS = [
+  {id:"dashboard", label:"Dashboard", adminOnly:false},
+  {id:"sponsors", label:"Sponsors", adminOnly:true},
+  {id:"participants", label:"Participants", adminOnly:true},
+  {id:"heatgen", label:"Heat Generator", adminOnly:true},
+  {id:"volunteers", label:"Volunteers", adminOnly:true},
+  {id:"schedule", label:"Event Schedule", adminOnly:false}
+];
+
+function renderTabsNav(){
+  const nav = document.getElementById("tabsNav");
+  const visible = TABS.filter(t=> DB.role==="admin" || !t.adminOnly);
+  nav.innerHTML = visible.map(t=>`<button data-tab="${t.id}" class="${currentTab===t.id?'active':''}">${t.label}</button>`).join("");
+  nav.querySelectorAll("button").forEach(b=> b.addEventListener("click", ()=>{ currentTab=b.dataset.tab; renderAll(); }));
+}
+
+function renderAll(){
+  document.getElementById("roleBadge").textContent = DB.role==="admin" ? "ADMIN" : "VOLUNTEER";
+  document.getElementById("roleBadge").className = "role-badge" + (DB.role==="admin"?"":" volunteer");
+  renderEventSelect();
+  renderTabsNav();
+  const main = document.getElementById("mainContent");
+  if(DB.role==="volunteer"){ main.innerHTML=""; renderMobileVolunteerView(main); return; }
+  main.innerHTML = "";
+  if(currentTab==="dashboard") renderDashboard(main);
+  else if(currentTab==="sponsors") renderSponsors(main);
+  else if(currentTab==="participants") renderParticipants(main);
+  else if(currentTab==="heatgen") renderHeatGen(main);
+  else if(currentTab==="volunteers") renderVolunteers(main);
+  else if(currentTab==="schedule") renderSchedule(main);
+}
+
+function renderEventSelect(){
+  const sel = document.getElementById("eventSelect");
+  sel.innerHTML = Object.values(DB.events).map(e=>`<option value="${e.id}" ${e.id===DB.currentEventId?'selected':''}>${esc(e.name)}</option>`).join("");
+  sel.onchange = ()=>{ DB.currentEventId = sel.value; saveDB(); renderAll(); };
+}
+
+/* =========================================================================
+   DASHBOARD
+   ========================================================================= */
+function daysUntil(ev){
+  const target = new Date(ev.date+"T"+ev.startTime+":00");
+  const now = new Date();
+  const diff = target - now;
+  return diff;
+}
+function renderDashboard(main){
+  const ev = curEvent();
+  const diff = daysUntil(ev);
+  const abs = Math.abs(diff);
+  const d = Math.floor(abs/86400000), h=Math.floor((abs%86400000)/3600000), m=Math.floor((abs%3600000)/60000);
+  const countdownLabel = diff>0 ? `${d}d ${h}h ${m}m until event` : `Event started ${d}d ${h}h ago`;
+
+  const byDiv = {}; DIVISIONS.forEach(dv=>byDiv[dv]=0);
+  ev.participants.forEach(p=> byDiv[p.division] = (byDiv[p.division]||0)+1);
+  const totalReg = ev.participants.length;
+
+  const dupes = detectDuplicateParticipants(ev);
+  const incomplete = detectIncompleteHeats(ev);
+  const volConflicts = detectVolunteerConflicts(ev);
+  const constraintViolations = validateConstraints(ev);
+  const coverage = detectMissingVolunteerCoverage(ev);
+  const unassignedVols = ev.volunteers.filter(v=> !ev.stationAssignments.some(a=>a.volunteerId===v.id) && !Object.keys(ROLE_SLOTS).some(r=> ev.roleAssignments.some(ra=>ra.volunteerId===v.id)) );
+
+  const sponsorConfirmed = ev.sponsors.filter(s=>s.status==="Confirmed").length;
+
+  function statClass(n){ return n===0?"green":(n<3?"orange":"red"); }
+
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title"><h2>${esc(ev.name)}</h2>${help("This overview summarizes event readiness. Green = ready, orange = needs attention, red = action required before event day.")}</div>
+      <div style="font-size:15px;color:var(--accent2);font-weight:700;">${countdownLabel}</div>
+    </div>
+
+    <div class="grid cols-4">
+      <div class="stat"><div class="num">${totalReg}</div><div class="label">Total Registrations</div></div>
+      <div class="stat"><div class="num">${ev.heats.length}</div><div class="label">Heats Scheduled</div></div>
+      <div class="stat"><div class="num">${ev.sponsors.length}</div><div class="label">Sponsors (${sponsorConfirmed} confirmed)</div></div>
+      <div class="stat"><div class="num">${ev.volunteers.length}</div><div class="label">Volunteers</div></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Registrations by Division</h3>${help("Count of participant records per division. Doubles/Mixed/Relay records represent one team each; Solo records represent one athlete each.")}</div>
+      <div class="grid cols-3">
+        ${DIVISIONS.map(dv=>`<div class="stat"><div class="num">${byDiv[dv]||0}</div><div class="label">${dv}</div></div>`).join("")}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Issues Requiring Attention</h3>${help("Auto-detected problems: duplicate participants, incomplete heats, volunteer scheduling conflicts, constraint violations, and station coverage gaps. Nothing is ever silently ignored.")}</div>
+      <div class="grid cols-4" style="margin-bottom:14px;">
+        <div class="stat ${statClass(dupes.length)}"><div class="num">${dupes.length}</div><div class="label">Duplicate Participants</div></div>
+        <div class="stat ${statClass(incomplete.length)}"><div class="num">${incomplete.length}</div><div class="label">Incomplete Heats</div></div>
+        <div class="stat ${statClass(volConflicts.length)}"><div class="num">${volConflicts.length}</div><div class="label">Volunteer Conflicts</div></div>
+        <div class="stat ${statClass(constraintViolations.length)}"><div class="num">${constraintViolations.length}</div><div class="label">Constraint Violations</div></div>
+      </div>
+      <div class="warn-list">
+        ${dupes.map(p=>`<div class="warn-item red">🔴 Possible duplicate: ${esc(fullName(p))} (${esc(p.email)})</div>`).join("")}
+        ${incomplete.map(h=>`<div class="warn-item orange">🟠 ${esc(h.division)} Heat ${h.heatNumberInDivision} at ${fmt12(h.time)} is under capacity (${h.participantIds.length}/${CAPACITY[h.division]}).</div>`).join("")}
+        ${volConflicts.map(c=>`<div class="warn-item red">🔴 ${esc(c.reason)}</div>`).join("")}
+        ${constraintViolations.map(v=>`<div class="warn-item ${v.level}">${v.level==='red'?'🔴':'🟠'} ${esc(v.msg)}</div>`).join("")}
+        ${coverage.missing>0?`<div class="warn-item orange">🟠 ${coverage.missing} of ${coverage.need} station slots are unfilled across all heats.</div>`:""}
+        ${(!dupes.length && !incomplete.length && !volConflicts.length && !constraintViolations.length && !coverage.missing) ? `<div class="warn-item green">🟢 No issues detected. Event is fully ready.</div>` : ""}
+      </div>
+    </div>
+
+    ${DB.role==="admin" ? renderFinancialDashboard(ev) : ""}
+  `;
+  if(DB.role==="admin") wireFinancialDashboard(ev);
+}
+
+function renderFinancialDashboard(ev){
+  const rows = ev.participants.map(p=>({p, std:standardPrice(p), actual:actualPrice(p), collected:collectedAmount(p)}));
+  const totalStd = rows.reduce((s,r)=>s+r.std,0);
+  const totalActual = rows.reduce((s,r)=>s+r.actual,0);
+  const totalCollected = rows.reduce((s,r)=>s+r.collected,0);
+  const memberRev = rows.filter(r=>r.p.memberStatus==="Member").reduce((s,r)=>s+r.actual,0);
+  const nonMemberRev = rows.filter(r=>r.p.memberStatus!=="Member").reduce((s,r)=>s+r.actual,0);
+  const avgRev = rows.length ? (totalActual/rows.length) : 0;
+  const paid = rows.filter(r=>r.p.paymentStatus==="Paid").length;
+  const pending = rows.filter(r=>r.p.paymentStatus==="Pending").length;
+  const comp = rows.filter(r=>r.p.paymentStatus==="Complimentary").length;
+
+  return `
+    <div class="card">
+      <div class="section-title"><h3>Admin Financial Dashboard</h3>${help("Standard revenue = full list price for every registration. Actual/collected revenue reflects overrides, discounts, complimentary entries, and payment status. Use manual overrides on the Participants tab.")}</div>
+      <div class="grid cols-4" style="margin-bottom:16px;">
+        <div class="stat"><div class="num">$${totalStd.toFixed(0)}</div><div class="label">Standard Revenue</div></div>
+        <div class="stat green"><div class="num">$${totalCollected.toFixed(0)}</div><div class="label">Actual Collected</div></div>
+        <div class="stat"><div class="num">$${memberRev.toFixed(0)}</div><div class="label">Member Revenue</div></div>
+        <div class="stat"><div class="num">$${nonMemberRev.toFixed(0)}</div><div class="label">Non-Member Revenue</div></div>
+      </div>
+      <div class="grid cols-4" style="margin-bottom:16px;">
+        <div class="stat"><div class="num">$${avgRev.toFixed(0)}</div><div class="label">Avg Revenue / Registration</div></div>
+        <div class="stat green"><div class="num">${paid}</div><div class="label">Paid</div></div>
+        <div class="stat orange"><div class="num">${pending}</div><div class="label">Pending</div></div>
+        <div class="stat"><div class="num">${comp}</div><div class="label">Complimentary</div></div>
+      </div>
+      <div class="grid cols-2">
+        <div><canvas id="chartByDivision" height="200"></canvas></div>
+        <div><canvas id="chartPayment" height="200"></canvas></div>
+      </div>
+      <div class="toolbar" style="margin-top:16px;">
+        <button class="primary" id="btnExportFinancial">⬇ Export Financial Summary (CSV)</button>
+      </div>
+    </div>
+  `;
+}
+function wireFinancialDashboard(ev){
+  const byDivEl = document.getElementById("chartByDivision");
+  const payEl = document.getElementById("chartPayment");
+  if(byDivEl && window.Chart){
+    const byDiv = {}; DIVISIONS.forEach(d=>byDiv[d]=0);
+    ev.participants.forEach(p=> byDiv[p.division]+= actualPrice(p));
+    new Chart(byDivEl, {type:"bar", data:{labels:DIVISIONS, datasets:[{label:"Revenue by Division", data:DIVISIONS.map(d=>byDiv[d]), backgroundColor:"#ff5b2e"}]},
+      options:{plugins:{legend:{display:false}}, scales:{x:{ticks:{color:"#8b96a5"}},y:{ticks:{color:"#8b96a5"}}}}});
+  }
+  if(payEl && window.Chart){
+    const paid = ev.participants.filter(p=>p.paymentStatus==="Paid").reduce((s,p)=>s+collectedAmount(p),0);
+    const pending = ev.participants.filter(p=>p.paymentStatus==="Pending").reduce((s,p)=>s+actualPrice(p),0);
+    const comp = ev.participants.filter(p=>p.paymentStatus==="Complimentary").length;
+    new Chart(payEl, {type:"doughnut", data:{labels:["Paid $","Pending $","Complimentary (count)"], datasets:[{data:[paid,pending,comp], backgroundColor:["#2ea043","#d29922","#8b96a5"]}]}, options:{plugins:{legend:{labels:{color:"#e6edf3"}}}}});
+  }
+  const btn = document.getElementById("btnExportFinancial");
+  if(btn) btn.addEventListener("click", ()=>{
+    const header = ["Participant/Team","Division","Member Status","Standard Price","Discount","Amount Collected","Payment Status"];
+    const rows = ev.participants.map(p=>[
+      p.division==="Relay"||p.division.indexOf("Doubles")!==-1 ? (p.teamName||fullName(p)) : fullName(p),
+      p.division, p.memberStatus, standardPrice(p), p.discount||0, collectedAmount(p), p.paymentStatus
+    ]);
+    const csv = Papa.unparse([header, ...rows]);
+    download(`${ev.name.replace(/[^a-z0-9]+/gi,'_')}_financial_summary.csv`, csv);
+  });
+}
+
+/* =========================================================================
+   SPONSORS
+   ========================================================================= */
+let sponsorView = "card";
+function renderSponsors(main){
+  const ev = curEvent();
+  const q = (document.getElementById("globalSearch").value||"").toLowerCase();
+  const list = ev.sponsors.filter(s=> !q || (s.company+s.contact+s.email).toLowerCase().includes(q));
+
+  main.innerHTML = `
+    <div class="toolbar">
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Sponsors</h2>${help("Track sponsor outreach and fulfillment. Use card view for quick scanning or table view for bulk review. Email/copy buttons speed up outreach.")}</div>
+      <div class="spacer"></div>
+      <div class="pill-toggle">
+        <button class="${sponsorView==='card'?'active':''}" data-v="card">Cards</button>
+        <button class="${sponsorView==='table'?'active':''}" data-v="table">Table</button>
+      </div>
+      <button class="primary" id="btnAddSponsor">+ Add Sponsor</button>
+    </div>
+    <div id="sponsorBody"></div>
+  `;
+  main.querySelectorAll(".pill-toggle button").forEach(b=> b.addEventListener("click", ()=>{ sponsorView=b.dataset.v; renderSponsors(main); }));
+  document.getElementById("btnAddSponsor").addEventListener("click", ()=> openSponsorModal(null));
+
+  const body = document.getElementById("sponsorBody");
+  if(!list.length){ body.innerHTML = `<div class="card">No sponsors yet.</div>`; return; }
+
+  if(sponsorView==="card"){
+    body.innerHTML = `<div class="grid cols-3">${list.map(s=>sponsorCardHtml(s)).join("")}</div>`;
+  } else {
+    body.innerHTML = `<div class="card table-wrap"><table>
+      <tr><th>Company</th><th>Contact</th><th>Status</th><th>Shipped</th><th>Received</th><th>Booth</th><th>Logo</th><th></th></tr>
+      ${list.map(s=>`<tr>
+        <td>${esc(s.company)}</td><td>${esc(s.contact)}</td><td>${statusBadge(s.status)}</td>
+        <td>${s.shipped?'✅':'—'}</td><td>${s.received?'✅':'—'}</td><td>${s.boothConfirmed?'✅':'—'}</td><td>${s.logoReceived?'✅':'—'}</td>
+        <td><button class="small" onclick="editSponsor('${s.id}')">Edit</button> <button class="small danger" onclick="deleteSponsor('${s.id}')">Delete</button></td>
+      </tr>`).join("")}
+    </table></div>`;
+  }
+}
+function statusBadge(status){
+  const cls = status==="Confirmed"?"green":status==="Declined"?"red":"orange";
+  return `<span class="badge ${cls}">${esc(status)}</span>`;
+}
+function sponsorCardHtml(s){
+  return `<div class="sponsor-card">
+    <div class="name">${esc(s.company)}</div>
+    <div class="meta">${esc(s.contact)} · ${esc(s.email)} · ${esc(s.phone)}</div>
+    ${statusBadge(s.status)}
+    <div class="checks" style="margin-top:10px;">
+      <label>${s.shipped?'✅':'⬜'} Shipped</label>
+      <label>${s.received?'✅':'⬜'} Received</label>
+      <label>${s.boothConfirmed?'✅':'⬜'} Booth</label>
+      <label>${s.logoReceived?'✅':'⬜'} Logo</label>
+    </div>
+    ${s.notes?`<div style="margin-top:8px;color:var(--muted);font-size:12px;">${esc(s.notes)}</div>`:""}
+    <div class="actions">
+      <button class="small" onclick="window.location.href='mailto:${esc(s.email)}'">✉ Email</button>
+      <button class="small" onclick="copyText('${esc(s.email)}')">Copy Email</button>
+      <button class="small" onclick="copyText('${esc(s.phone)}')">Copy Phone</button>
+      <button class="small" onclick="editSponsor('${s.id}')">Edit</button>
+      <button class="small danger" onclick="deleteSponsor('${s.id}')">Delete</button>
+    </div>
+  </div>`;
+}
+function copyText(t){ navigator.clipboard?.writeText(t).catch(()=>{}); }
+function openSponsorModal(sponsor){
+  const s = sponsor || {id:null, company:"",contact:"",email:"",phone:"",status:"Waiting for response",shipped:false,received:false,boothConfirmed:false,logoReceived:false,notes:""};
+  openModal(`
+    <h2>${sponsor?"Edit":"Add"} Sponsor</h2>
+    <div class="form-grid">
+      <div class="form-row"><label>Company Name</label><input id="f_company" value="${esc(s.company)}"></div>
+      <div class="form-row"><label>Contact Name</label><input id="f_contact" value="${esc(s.contact)}"></div>
+      <div class="form-row"><label>Email</label><input id="f_email" value="${esc(s.email)}"></div>
+      <div class="form-row"><label>Phone Number</label><input id="f_phone" value="${esc(s.phone)}"></div>
+      <div class="form-row"><label>Status</label><select id="f_status">${SPONSOR_STATUSES.map(x=>`<option ${x===s.status?'selected':''}>${x}</option>`).join("")}</select></div>
+    </div>
+    <div class="form-row"><label>Checklist</label>
+      <div class="checks">
+        <label><input type="checkbox" id="f_shipped" ${s.shipped?'checked':''}> Products shipped</label>
+        <label><input type="checkbox" id="f_received" ${s.received?'checked':''}> Products received</label>
+        <label><input type="checkbox" id="f_booth" ${s.boothConfirmed?'checked':''}> Booth confirmed</label>
+        <label><input type="checkbox" id="f_logo" ${s.logoReceived?'checked':''}> Logo received</label>
+      </div>
+    </div>
+    <div class="form-row"><label>Notes</label><textarea id="f_notes" rows="3">${esc(s.notes)}</textarea></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveSponsor('${s.id||''}')">Save</button>
+    </div>
+  `);
+}
+function saveSponsor(id){
+  const ev = curEvent();
+  const data = {
+    company: document.getElementById("f_company").value.trim(),
+    contact: document.getElementById("f_contact").value.trim(),
+    email: document.getElementById("f_email").value.trim(),
+    phone: document.getElementById("f_phone").value.trim(),
+    status: document.getElementById("f_status").value,
+    shipped: document.getElementById("f_shipped").checked,
+    received: document.getElementById("f_received").checked,
+    boothConfirmed: document.getElementById("f_booth").checked,
+    logoReceived: document.getElementById("f_logo").checked,
+    notes: document.getElementById("f_notes").value
+  };
+  pushUndo();
+  if(id){ Object.assign(ev.sponsors.find(s=>s.id===id), data); }
+  else { ev.sponsors.push(Object.assign({id:uid()}, data)); }
+  saveDB(); closeModal(); renderAll();
+}
+function editSponsor(id){ openSponsorModal(curEvent().sponsors.find(s=>s.id===id)); }
+function deleteSponsor(id){ if(!confirm("Delete this sponsor?")) return; pushUndo(); const ev=curEvent(); ev.sponsors=ev.sponsors.filter(s=>s.id!==id); saveDB(); renderAll(); }
+
+/* =========================================================================
+   PARTICIPANTS
+   ========================================================================= */
+function renderParticipants(main){
+  const ev = curEvent();
+  const q = (document.getElementById("globalSearch").value||"").toLowerCase();
+  const dupes = new Set(detectDuplicateParticipants(ev).map(p=>p.id));
+  const list = ev.participants.filter(p=> !q || (fullName(p)+p.email+p.division).toLowerCase().includes(q));
+
+  main.innerHTML = `
+    <div class="toolbar">
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Participants</h2>${help("All race registrations. Doubles/Mixed/Relay each represent one team entry; Solo represents one athlete. Duplicate emails are flagged automatically. Import a CSV to bulk-load registrations.")}</div>
+      <div class="spacer"></div>
+      <button class="small" id="btnImportCsv">⬆ Import CSV</button>
+      <input type="file" id="csvFile" accept=".csv" class="hidden">
+      <button class="primary" id="btnAddParticipant">+ Add Participant</button>
+    </div>
+    <div class="card table-wrap">
+      <table>
+        <tr><th>Name / Team</th><th>Division</th><th>Member</th><th>Contact</th><th>Constraints</th><th>Price</th><th>Payment</th><th></th></tr>
+        ${list.map(p=>`<tr style="${dupes.has(p.id)?'background:var(--red-bg);':''}">
+          <td>${esc(p.division.indexOf("Doubles")!==-1||p.division==="Relay" ? (p.teamName||fullName(p)) : fullName(p))}${dupes.has(p.id)?' <span class="badge red">DUP</span>':''}</td>
+          <td>${esc(p.division)}</td>
+          <td>${esc(p.memberStatus)}</td>
+          <td>${esc(p.email)}<br><span style="color:var(--muted)">${esc(p.phone)}</span></td>
+          <td>${(p.constraints||[]).map(c=>`<span class="badge gray">${constraintLabel(c)}</span>`).join(" ")}</td>
+          <td>$${actualPrice(p).toFixed(0)} ${actualPrice(p)!==standardPrice(p)?`<span style="color:var(--muted);text-decoration:line-through;font-size:11px;">$${standardPrice(p)}</span>`:""}</td>
+          <td>${paymentBadge(p.paymentStatus)}</td>
+          <td><button class="small" onclick="editParticipant('${p.id}')">Edit</button> <button class="small danger" onclick="deleteParticipant('${p.id}')">Del</button></td>
+        </tr>`).join("")}
+      </table>
+    </div>
+  `;
+  document.getElementById("btnAddParticipant").addEventListener("click", ()=> openParticipantModal(null));
+  document.getElementById("btnImportCsv").addEventListener("click", ()=> document.getElementById("csvFile").click());
+  document.getElementById("csvFile").addEventListener("change", handleCsvImport);
+}
+function constraintLabel(c){
+  const meta = CONSTRAINT_TYPES.find(x=>x.v===c.type);
+  if(c.type==="mustBefore") return "Before "+fmt12(c.time);
+  if(c.type==="cannotBefore") return "Not before "+fmt12(c.time);
+  if(c.type==="afterAthlete") return "After athlete";
+  return meta?meta.label:c.type;
+}
+function paymentBadge(status){
+  const cls = status==="Paid"?"green":status==="Pending"?"orange":"gray";
+  return `<span class="badge ${cls}">${esc(status)}</span>`;
+}
+function openParticipantModal(participant){
+  const ev = curEvent();
+  const p = participant || {id:null, firstName:"",lastName:"",email:"",phone:"",memberStatus:"Member",division:DIVISIONS[0],teamName:"",partnerNames:"",constraints:[],priceOverride:null,discount:0,paymentStatus:"Pending"};
+  openModal(`
+    <h2>${participant?"Edit":"Add"} Participant</h2>
+    <div class="form-grid">
+      <div class="form-row"><label>First Name</label><input id="f_fn" value="${esc(p.firstName)}"></div>
+      <div class="form-row"><label>Last Name</label><input id="f_ln" value="${esc(p.lastName)}"></div>
+      <div class="form-row"><label>Email</label><input id="f_email" value="${esc(p.email)}"></div>
+      <div class="form-row"><label>Phone</label><input id="f_phone" value="${esc(p.phone)}"></div>
+      <div class="form-row"><label>Member Status</label><select id="f_member"><option ${p.memberStatus==='Member'?'selected':''}>Member</option><option ${p.memberStatus==='Non-member'?'selected':''}>Non-member</option></select></div>
+      <div class="form-row"><label>Division</label><select id="f_div">${DIVISIONS.map(d=>`<option ${d===p.division?'selected':''}>${d}</option>`).join("")}</select></div>
+      <div class="form-row"><label>Team Name (doubles/relay)</label><input id="f_team" value="${esc(p.teamName)}"></div>
+      <div class="form-row"><label>Partner Names</label><input id="f_partners" value="${esc(p.partnerNames)}"></div>
+      <div class="form-row"><label>Payment Status</label><select id="f_pay">${PAYMENT_STATUSES.map(s=>`<option ${s===p.paymentStatus?'selected':''}>${s}</option>`).join("")}</select></div>
+      <div class="form-row"><label>Discount ($)</label><input id="f_discount" type="number" value="${p.discount||0}"></div>
+      <div class="form-row"><label>Manual Price Override ($, blank=auto)</label><input id="f_override" type="number" value="${p.priceOverride!=null?p.priceOverride:''}"></div>
+    </div>
+    <div class="form-row"><label>Special Constraints</label>
+      <div id="constraintsList">${renderConstraintRows(p.constraints||[], ev)}</div>
+      <button class="small" style="margin-top:6px;" onclick="addConstraintRow()">+ Add constraint</button>
+    </div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveParticipant('${p.id||''}')">Save</button>
+    </div>
+  `);
+}
+function renderConstraintRows(constraints, ev){
+  return constraints.map((c,i)=>`
+    <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;" data-idx="${i}">
+      <select class="c_type" style="flex:1;">${CONSTRAINT_TYPES.map(t=>`<option value="${t.v}" ${t.v===c.type?'selected':''}>${t.label}</option>`).join("")}</select>
+      <input class="c_time" type="time" value="${c.time||''}" style="width:110px;${c.type==='mustBefore'||c.type==='cannotBefore'?'':'display:none;'}">
+      <select class="c_athlete" style="flex:1;${c.type==='afterAthlete'?'':'display:none;'}"><option value="">Select athlete</option>${ev.participants.map(p=>`<option value="${p.id}" ${p.id===c.athleteId?'selected':''}>${esc(fullName(p))}</option>`).join("")}</select>
+      <button class="small danger" onclick="this.parentElement.remove()">✕</button>
+    </div>
+  `).join("");
+}
+function addConstraintRow(){
+  const ev = curEvent();
+  const div = document.getElementById("constraintsList");
+  const wrap = document.createElement("div");
+  wrap.innerHTML = renderConstraintRows([{type:"mustBefore",time:"10:00"}], ev);
+  div.appendChild(wrap.firstElementChild);
+  wireConstraintTypeChange();
+}
+function wireConstraintTypeChange(){
+  document.querySelectorAll("#constraintsList .c_type").forEach(sel=>{
+    sel.onchange = ()=>{
+      const row = sel.parentElement;
+      row.querySelector(".c_time").style.display = (sel.value==="mustBefore"||sel.value==="cannotBefore")?"":"none";
+      row.querySelector(".c_athlete").style.display = sel.value==="afterAthlete"?"":"none";
+    };
+  });
+}
+setTimeout(wireConstraintTypeChange, 0);
+function saveParticipant(id){
+  const ev = curEvent();
+  const rows = document.querySelectorAll("#constraintsList > div");
+  const constraints = Array.from(rows).map(r=>({
+    type: r.querySelector(".c_type").value,
+    time: r.querySelector(".c_time").value,
+    athleteId: r.querySelector(".c_athlete").value
+  }));
+  const data = {
+    firstName: document.getElementById("f_fn").value.trim(),
+    lastName: document.getElementById("f_ln").value.trim(),
+    email: document.getElementById("f_email").value.trim(),
+    phone: document.getElementById("f_phone").value.trim(),
+    memberStatus: document.getElementById("f_member").value,
+    division: document.getElementById("f_div").value,
+    teamName: document.getElementById("f_team").value.trim(),
+    partnerNames: document.getElementById("f_partners").value.trim(),
+    paymentStatus: document.getElementById("f_pay").value,
+    discount: Number(document.getElementById("f_discount").value)||0,
+    priceOverride: document.getElementById("f_override").value===""?null:Number(document.getElementById("f_override").value),
+    constraints
+  };
+  pushUndo();
+  if(id){ Object.assign(ev.participants.find(p=>p.id===id), data); }
+  else { ev.participants.push(Object.assign({id:uid()}, data)); }
+  saveDB(); closeModal(); renderAll();
+}
+function editParticipant(id){ openParticipantModal(curEvent().participants.find(p=>p.id===id)); setTimeout(wireConstraintTypeChange,0); }
+function deleteParticipant(id){ if(!confirm("Delete this participant?")) return; pushUndo(); const ev=curEvent(); ev.participants=ev.participants.filter(p=>p.id!==id); saveDB(); renderAll(); }
+
+function handleCsvImport(e){
+  const file = e.target.files[0]; if(!file) return;
+  Papa.parse(file, {header:true, skipEmptyLines:true, complete: (res)=>{
+    const ev = curEvent(); pushUndo();
+    res.data.forEach(row=>{
+      ev.participants.push({
+        id: uid(),
+        firstName: row["First Name"]||row.firstName||"",
+        lastName: row["Last Name"]||row.lastName||"",
+        email: row["Email"]||row.email||"",
+        phone: row["Phone"]||row.phone||"",
+        memberStatus: row["Member Status"]||row.memberStatus||"Non-member",
+        division: row["Division"]||row.division||DIVISIONS[0],
+        teamName: row["Team Name"]||row.teamName||"",
+        partnerNames: row["Partner Names"]||row.partnerNames||"",
+        constraints: [],
+        discount:0, priceOverride:null,
+        paymentStatus: row["Payment Status"]||row.paymentStatus||"Pending"
+      });
+    });
+    saveDB(); renderAll();
+  }});
+}
+
+/* =========================================================================
+   HEAT GENERATOR
+   ========================================================================= */
+function renderHeatGen(main){
+  const ev = curEvent();
+  const violations = validateConstraints(ev);
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title"><h2>Heat Generator</h2>${help("Set event timing, then generate the full day schedule automatically in fixed division order: Men's Doubles → Mixed Doubles → Women's Doubles → Men's Solo → Women's Solo → Relay. Drag participant chips between heats to make manual changes.")}</div>
+      <div class="form-grid">
+        <div class="form-row"><label>Event Start Time</label><input id="hg_start" type="time" value="${ev.startTime}"></div>
+        <div class="form-row"><label>Heat Interval (minutes)</label><input id="hg_interval" type="number" value="${ev.heatInterval}"></div>
+        <div class="form-row"><label>Race Duration (minutes)</label><input id="hg_duration" type="number" value="${ev.raceDuration}"></div>
+      </div>
+      <div class="toolbar">
+        <button class="primary" id="btnGenerate">⚙ Generate / Regenerate Full Schedule</button>
+        <span style="color:var(--muted);font-size:12px;">Registrations: ${DIVISIONS.map(d=>`${d}: ${ev.participants.filter(p=>p.division===d).length}`).join(" · ")}</span>
+      </div>
+    </div>
+
+    ${violations.length ? `<div class="card">
+      <div class="section-title"><h3>Constraint Warnings</h3>${help("These constraints could not be fully satisfied automatically. Nothing is silently ignored — resolve manually via drag-and-drop or by editing the participant.")}</div>
+      <div class="warn-list">${violations.map(v=>`<div class="warn-item ${v.level}">${v.level==='red'?'🔴':'🟠'} ${esc(v.msg)}</div>`).join("")}</div>
+    </div>` : ""}
+
+    <div class="card">
+      <div class="section-title"><h3>Schedule</h3>${help("Drag a participant chip onto another heat's column to move them. Locked/manual-locked participants are marked and should be moved carefully.")}</div>
+      <div class="heat-schedule" id="heatSchedule">${ev.heats.length ? ev.heats.map(h=>heatColHtml(ev,h)).join("") : "<div style='color:var(--muted)'>No schedule generated yet.</div>"}</div>
+    </div>
+  `;
+  document.getElementById("btnGenerate").addEventListener("click", ()=>{
+    ev.startTime = document.getElementById("hg_start").value || ev.startTime;
+    ev.heatInterval = Number(document.getElementById("hg_interval").value)||ev.heatInterval;
+    ev.raceDuration = Number(document.getElementById("hg_duration").value)||ev.raceDuration;
+    generateHeats(ev);
+    saveDB(); renderAll();
+  });
+  wireHeatDragDrop();
+}
+function heatColHtml(ev, h){
+  const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
+  return `<div class="heat-col" data-heat="${h.id}">
+    <div class="heat-header"><span>${esc(h.division)} · Heat ${h.heatNumberInDivision}</span><span class="heat-time">${fmt12(h.time)}</span></div>
+    ${parts.map(p=>`<div class="participant-chip ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" draggable="true" data-pid="${p.id}">
+      <span>${esc(p.division.indexOf("Doubles")!==-1||p.division==="Relay"?(p.teamName||fullName(p)):fullName(p))}</span>
+      ${(p.constraints||[]).some(c=>c.type==='vip')?'<span class="tag">VIP</span>':''}
+    </div>`).join("")}
+    ${parts.length < CAPACITY[h.division] ? `<div style="color:var(--orange);font-size:11px;">Under capacity</div>` : ""}
+  </div>`;
+}
+function wireHeatDragDrop(){
+  let dragPid = null, dragFromHeat = null;
+  document.querySelectorAll(".participant-chip").forEach(chip=>{
+    chip.addEventListener("dragstart", ()=>{ dragPid = chip.dataset.pid; dragFromHeat = chip.closest(".heat-col").dataset.heat; });
+  });
+  document.querySelectorAll(".heat-col").forEach(col=>{
+    col.addEventListener("dragover", e=>{ e.preventDefault(); col.classList.add("dragover"); });
+    col.addEventListener("dragleave", ()=> col.classList.remove("dragover"));
+    col.addEventListener("drop", e=>{
+      e.preventDefault(); col.classList.remove("dragover");
+      const toHeatId = col.dataset.heat;
+      if(!dragPid || toHeatId===dragFromHeat) return;
+      const ev = curEvent();
+      pushUndo();
+      ev.heats.forEach(h=>{ const idx=h.participantIds.indexOf(dragPid); if(idx>=0) h.participantIds.splice(idx,1); });
+      const target = ev.heats.find(h=>h.id===toHeatId);
+      target.participantIds.push(dragPid);
+      saveDB(); renderAll();
+    });
+  });
+}
+
+/* =========================================================================
+   VOLUNTEERS
+   ========================================================================= */
+function renderVolunteers(main){
+  const ev = curEvent();
+  const q = (document.getElementById("globalSearch").value||"").toLowerCase();
+  const list = ev.volunteers.filter(v=> !q || v.name.toLowerCase().includes(q));
+
+  main.innerHTML = `
+    <div class="toolbar">
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Volunteers</h2>${help("Manage volunteer roster and station/role assignments. If a volunteer is also racing, their unavailable window (20 min before race start to race-duration after) is calculated automatically and enforced everywhere.")}</div>
+      <div class="spacer"></div>
+      <button class="small" id="btnAutoAssign">⚙ Auto-Assign Stations</button>
+      <button class="primary" id="btnAddVolunteer">+ Add Volunteer</button>
+    </div>
+    <div class="grid cols-2">
+      ${list.map(v=>volunteerCardHtml(ev,v)).join("")}
+    </div>
+  `;
+  document.getElementById("btnAddVolunteer").addEventListener("click", ()=> openVolunteerModal(null));
+  document.getElementById("btnAutoAssign").addEventListener("click", ()=>{ autoAssignStations(ev); renderAll(); });
+}
+function volunteerCardHtml(ev, v){
+  const unavail = getUnavailability(ev, v);
+  const assignments = ev.stationAssignments.filter(a=>a.volunteerId===v.id);
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;">
+      <div><div style="font-weight:700;font-size:15px;">${esc(v.name)}</div><div style="color:var(--muted);font-size:12px;">${esc(v.email)} · ${esc(v.phone)}</div></div>
+      <div><button class="small" onclick="editVolunteer('${v.id}')">Edit</button> <button class="small danger" onclick="deleteVolunteer('${v.id}')">Del</button></div>
+    </div>
+    <div style="margin-top:8px;font-size:12px;color:var(--muted);">Availability: ${esc(v.availability||"Full day")}</div>
+    ${v.participating ? `<div style="margin-top:6px;font-size:12px;">🏁 Racing${unavail?` at <b>${fmt12(unavail.raceTime)}</b> — unavailable ${fmt12(unavail.start)} to ${fmt12(unavail.end)}`:" (not yet scheduled)"}</div>` : ""}
+    <div style="margin-top:8px;">${assignments.length ? assignments.map(a=>{const h=ev.heats.find(x=>x.id===a.heatId); return `<span class="badge gray">${a.station} · ${h?fmt12(h.time):"?"}</span>`;}).join(" ") : `<span class="badge orange">No station assignments</span>`}</div>
+    ${renderVolunteerTimeline(ev,v)}
+  </div>`;
+}
+function renderVolunteerTimeline(ev, v){
+  const dayStart = timeToMin(ev.startTime)-30;
+  const lastHeat = ev.heats[ev.heats.length-1];
+  const dayEnd = lastHeat ? timeToMin(lastHeat.time)+ev.raceDuration+30 : timeToMin(ev.startTime)+240;
+  const span = dayEnd-dayStart;
+  const blocks = [];
+  const unavail = getUnavailability(ev, v);
+  if(unavail){
+    blocks.push({start:timeToMin(unavail.start), end:timeToMin(unavail.end), color:"#f85149", label:"Racing/Unavailable"});
+  }
+  ev.stationAssignments.filter(a=>a.volunteerId===v.id).forEach(a=>{
+    const h = ev.heats.find(x=>x.id===a.heatId); if(!h) return;
+    const s=timeToMin(h.time), e=s+ev.raceDuration;
+    blocks.push({start:s,end:e,color:"#3b9dff",label:a.station});
+  });
+  const hourMarks = [];
+  for(let t=Math.ceil(dayStart/60)*60; t<dayEnd; t+=60){
+    hourMarks.push(`<div class="hourmark" style="left:${((t-dayStart)/span*100)}%">${minToTime(t)}</div>`);
+  }
+  return `<div class="timeline">
+    ${hourMarks.join("")}
+    ${blocks.map(b=>`<div class="block" style="left:${((b.start-dayStart)/span*100)}%;width:${((b.end-b.start)/span*100)}%;background:${b.color};" title="${esc(b.label)}">${esc(b.label)}</div>`).join("")}
+  </div>`;
+}
+function openVolunteerModal(volunteer){
+  const ev = curEvent();
+  const v = volunteer || {id:null,name:"",email:"",phone:"",availability:"Full day",notes:"",participating:false,participantId:""};
+  openModal(`
+    <h2>${volunteer?"Edit":"Add"} Volunteer</h2>
+    <div class="form-grid">
+      <div class="form-row"><label>Name</label><input id="f_name" value="${esc(v.name)}"></div>
+      <div class="form-row"><label>Email</label><input id="f_email" value="${esc(v.email)}"></div>
+      <div class="form-row"><label>Phone</label><input id="f_phone" value="${esc(v.phone)}"></div>
+      <div class="form-row"><label>Availability</label><input id="f_avail" value="${esc(v.availability)}"></div>
+    </div>
+    <div class="form-row"><label><input type="checkbox" id="f_participating" ${v.participating?'checked':''}> Also participating as an athlete</label></div>
+    <div class="form-row" id="f_participantWrap" style="${v.participating?'':'display:none;'}">
+      <label>Linked Participant</label>
+      <select id="f_participantId"><option value="">— none —</option>${ev.participants.map(p=>`<option value="${p.id}" ${p.id===v.participantId?'selected':''}>${esc(fullName(p))} (${p.division})</option>`).join("")}</select>
+    </div>
+    <div class="form-row"><label>Notes</label><textarea id="f_notes" rows="3">${esc(v.notes)}</textarea></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveVolunteer('${v.id||''}')">Save</button>
+    </div>
+  `);
+  document.getElementById("f_participating").addEventListener("change", (e)=>{
+    document.getElementById("f_participantWrap").style.display = e.target.checked?"":"none";
+  });
+}
+function saveVolunteer(id){
+  const ev = curEvent();
+  const data = {
+    name: document.getElementById("f_name").value.trim(),
+    email: document.getElementById("f_email").value.trim(),
+    phone: document.getElementById("f_phone").value.trim(),
+    availability: document.getElementById("f_avail").value.trim(),
+    participating: document.getElementById("f_participating").checked,
+    participantId: document.getElementById("f_participantId").value || null,
+    notes: document.getElementById("f_notes").value
+  };
+  pushUndo();
+  if(id){ Object.assign(ev.volunteers.find(v=>v.id===id), data); }
+  else { ev.volunteers.push(Object.assign({id:uid()}, data)); }
+  saveDB(); closeModal(); renderAll();
+}
+function editVolunteer(id){ openVolunteerModal(curEvent().volunteers.find(v=>v.id===id)); }
+function deleteVolunteer(id){
+  if(!confirm("Delete this volunteer?")) return;
+  pushUndo();
+  const ev = curEvent();
+  ev.volunteers = ev.volunteers.filter(v=>v.id!==id);
+  ev.stationAssignments = ev.stationAssignments.filter(a=>a.volunteerId!==id);
+  saveDB(); renderAll();
+}
+
+/* =========================================================================
+   EVENT SCHEDULE (full synchronized view)
+   ========================================================================= */
+let scheduleFilters = {division:"", volunteer:"", station:"", search:""};
+function renderSchedule(main){
+  const ev = curEvent();
+  scheduleFilters.search = (document.getElementById("globalSearch").value||"").toLowerCase();
+
+  main.innerHTML = `
+    <div class="toolbar no-print">
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Event Schedule</h2>${help("Full synchronized view of every heat, station assignment, and volunteer. Filter by division, volunteer, or station. Use Print for a paper copy on event day.")}</div>
+      <div class="spacer"></div>
+      <select id="filterDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${scheduleFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
+      <select id="filterVolunteer"><option value="">All Volunteers</option>${ev.volunteers.map(v=>`<option value="${v.id}" ${scheduleFilters.volunteer===v.id?'selected':''}>${esc(v.name)}</option>`).join("")}</select>
+      <select id="filterStation"><option value="">All Stations</option>${STATIONS.map(s=>`<option ${scheduleFilters.station===s?'selected':''}>${s}</option>`).join("")}</select>
+      <button class="small" onclick="window.print()">🖨 Print</button>
+    </div>
+    <div class="card table-wrap" id="scheduleTableWrap"></div>
+  `;
+  ["filterDivision","filterVolunteer","filterStation"].forEach(id=>{
+    document.getElementById(id).addEventListener("change", ()=>{
+      scheduleFilters.division = document.getElementById("filterDivision").value;
+      scheduleFilters.volunteer = document.getElementById("filterVolunteer").value;
+      scheduleFilters.station = document.getElementById("filterStation").value;
+      renderScheduleTable(ev);
+    });
+  });
+  renderScheduleTable(ev);
+}
+function renderScheduleTable(ev){
+  let heats = ev.heats.slice();
+  if(scheduleFilters.division) heats = heats.filter(h=>h.division===scheduleFilters.division);
+  const wrap = document.getElementById("scheduleTableWrap");
+  wrap.innerHTML = `<table>
+    <tr><th>Time</th><th>Division / Heat</th><th>Participants</th><th>Station Assignments</th></tr>
+    ${heats.map(h=>{
+      const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
+      let assigns = ev.stationAssignments.filter(a=>a.heatId===h.id);
+      if(scheduleFilters.station) assigns = assigns.filter(a=>a.station===scheduleFilters.station);
+      if(scheduleFilters.volunteer) assigns = assigns.filter(a=>a.volunteerId===scheduleFilters.volunteer);
+      if(scheduleFilters.volunteer && !assigns.length) return "";
+      if(scheduleFilters.search && !(h.division+parts.map(fullName).join(" ")).toLowerCase().includes(scheduleFilters.search)) return "";
+      return `<tr>
+        <td>${fmt12(h.time)}</td>
+        <td>${esc(h.division)} · Heat ${h.heatNumberInDivision}</td>
+        <td>${parts.map(p=>esc(p.division.indexOf("Doubles")!==-1||p.division==="Relay"?(p.teamName||fullName(p)):fullName(p))).join(", ")}</td>
+        <td>${assigns.map(a=>{const v=ev.volunteers.find(x=>x.id===a.volunteerId); return `<span class="badge gray">${a.station}: ${v?esc(v.name):"?"}</span>`;}).join(" ")}</td>
+      </tr>`;
+    }).join("")}
+  </table>`;
+}
+
+/* =========================================================================
+   MOBILE VOLUNTEER VIEW
+   ========================================================================= */
+function renderMobileVolunteerView(main){
+  const ev = curEvent();
+  const vol = ev.volunteers.find(v=>v.id===DB.currentVolunteerId);
+  if(!vol){ main.innerHTML = `<div class="card">Volunteer not found for this event. <button onclick="logout()">Switch user</button></div>`; return; }
+  const unavail = getUnavailability(ev, vol);
+  const assignments = ev.stationAssignments.filter(a=>a.volunteerId===vol.id);
+  main.innerHTML = `
+    <div id="mobileView">
+      <div class="mv-hero"><h2>👋 Hi ${esc(vol.name)}</h2><div class="sub">${esc(ev.name)}</div></div>
+
+      <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">Assigned Station${assignments.length>1?"s":""}</div>
+        <div class="big">${assignments.length ? assignments.map(a=>{const h=ev.heats.find(x=>x.id===a.heatId); return a.station+(h?" @ "+fmt12(h.time):"");}).join(", ") : "Not yet assigned"}</div></div></div>
+
+      ${vol.participating ? `<div class="mv-block"><div class="icon">🏁</div><div><div class="lbl">Your Race Time</div>
+        <div class="big">${unavail?fmt12(unavail.raceTime):"Not yet scheduled"}</div></div></div>` : ""}
+
+      <div class="mv-block"><div class="icon">⏰</div><div><div class="lbl">Arrival Time</div>
+        <div class="big">${fmt12(addMinutes(ev.startTime,-30))}</div></div></div>
+
+      ${unavail ? `<div class="mv-block"><div class="icon">🚫</div><div><div class="lbl">Unavailable Window</div>
+        <div class="big">${fmt12(unavail.start)} – ${fmt12(unavail.end)}</div></div></div>
+      <div class="mv-block"><div class="icon">✅</div><div><div class="lbl">Available Again At</div>
+        <div class="big">${fmt12(unavail.end)}</div></div></div>` : ""}
+
+      ${renderVolunteerTimeline(ev, vol)}
+
+      <button style="width:100%;margin-top:16px;padding:16px;" onclick="logout()">Switch User</button>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   LOGIN / LOGOUT
+   ========================================================================= */
+function logout(){ DB.role=null; DB.currentVolunteerId=null; saveDB(); showLogin(); }
+function showLogin(){
+  document.getElementById("appShell").style.display = "none";
+  document.getElementById("loginScreen").style.display = "flex";
+  document.getElementById("adminPasswordPrompt").classList.add("hidden");
+  document.getElementById("volunteerPicker").classList.add("hidden");
+  document.getElementById("adminPasswordError").style.display = "none";
+  document.getElementById("adminPasswordInput").value = "";
+  const vs = document.getElementById("volunteerSelect");
+  vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
+}
+function enterApp(){
+  document.getElementById("loginScreen").style.display = "none";
+  document.getElementById("appShell").style.display = "flex";
+  currentTab = DB.role==="admin" ? "dashboard" : "schedule";
+  renderAll();
+}
+function tryAdminLogin(){
+  const val = document.getElementById("adminPasswordInput").value;
+  if(val === ADMIN_PASSWORD){
+    DB.role="admin"; saveDB(true); enterApp();
+  } else {
+    document.getElementById("adminPasswordError").style.display = "block";
+    document.getElementById("adminPasswordInput").value = "";
+    document.getElementById("adminPasswordInput").focus();
+  }
+}
+document.getElementById("btnAdminLogin").addEventListener("click", ()=>{
+  document.getElementById("volunteerPicker").classList.add("hidden");
+  document.getElementById("adminPasswordPrompt").classList.remove("hidden");
+  document.getElementById("adminPasswordError").style.display = "none";
+  document.getElementById("adminPasswordInput").focus();
+});
+document.getElementById("btnAdminContinue").addEventListener("click", tryAdminLogin);
+document.getElementById("adminPasswordInput").addEventListener("keydown", (e)=>{ if(e.key==="Enter") tryAdminLogin(); });
+document.getElementById("btnVolunteerLogin").addEventListener("click", ()=>{
+  document.getElementById("adminPasswordPrompt").classList.add("hidden");
+  document.getElementById("volunteerPicker").classList.remove("hidden");
+});
+document.getElementById("btnVolunteerContinue").addEventListener("click", ()=>{
+  DB.role="volunteer"; DB.currentVolunteerId = document.getElementById("volunteerSelect").value; saveDB(true); enterApp();
+});
+document.getElementById("btnSwitchUser").addEventListener("click", logout);
+document.getElementById("btnNewEvent").addEventListener("click", ()=>{
+  const name = prompt("New event name:", "HYROX Simulation — "); if(!name) return;
+  const dateStr = prompt("Event date (YYYY-MM-DD):", new Date().toISOString().slice(0,10)) || new Date().toISOString().slice(0,10);
+  const ev = defaultEvent(name, dateStr);
+  DB.events[ev.id] = ev; DB.currentEventId = ev.id;
+  saveDB(); renderAll();
+});
+document.getElementById("globalSearch").addEventListener("input", debounce(()=>renderAll(),150));
+
+/* Keyboard shortcuts */
+document.addEventListener("keydown", (e)=>{
+  if(e.key==="/" && document.activeElement.tagName!=="INPUT" && document.activeElement.tagName!=="TEXTAREA" && document.activeElement.tagName!=="SELECT"){
+    e.preventDefault(); document.getElementById("globalSearch").focus();
+  }
+  if(e.ctrlKey && e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
+  if(e.key==="Escape") closeModal();
+});
+
+/* =========================================================================
+   INIT
+   ========================================================================= */
+loadDB();
+if(DB.role){ enterApp(); } else { showLogin(); }
+initCloudSync();
+</script>
+</body>
+</html>
