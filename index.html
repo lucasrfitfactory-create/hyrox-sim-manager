@@ -176,7 +176,7 @@ tr:hover td{background:var(--bg3);}
     <div class="role-btns">
       <button class="primary" id="btnAdminLogin">Admin</button>
       <button id="btnVolunteerLogin">Volunteer</button>
-      <button id="btnParticipantLogin">Participant</button>
+      <button id="btnParticipantLogin">Athlete</button>
     </div>
     <div id="adminPasswordPrompt" class="hidden" style="margin-top:12px;text-align:left;">
       <label style="font-size:12px;color:var(--muted);font-weight:600;">Admin email</label>
@@ -769,6 +769,8 @@ function renderAll(){
   document.getElementById("roleBadge").className = "role-badge" + (DB.role==="admin"?"":" volunteer");
   renderEventSelect();
   renderTabsNav();
+  document.getElementById("btnNewEvent").style.display = DB.role==="admin" ? "" : "none";
+  document.getElementById("eventSelect").disabled = DB.role!=="admin";
   const main = document.getElementById("mainContent");
   if(DB.role==="volunteer"){ main.innerHTML=""; renderMobileVolunteerView(main); return; }
   if(DB.role==="participant"){ main.innerHTML=""; renderParticipantView(main); return; }
@@ -2307,12 +2309,9 @@ function renderParticipantView(main){
     statusBlock = `<div class="mv-hero" style="background:linear-gradient(135deg,var(--accent),#a33314);"><h2>🔥 You're racing!</h2><div class="sub">Give it everything</div></div>
       <div class="mv-block"><div class="icon">⏱</div><div><div class="lbl">Time Elapsed</div><div class="big" data-live-timer="${heat.actualStartTs}">${fmtElapsed(now-heat.actualStartTs)}</div></div></div>`;
   } else if(heat){
-    const startTs = heatScheduledTs(ev, heat);
-    const diffMin = Math.round((startTs-now)/60000);
     statusBlock = `<div class="mv-hero"><h2>👋 Hi ${esc(fullName(p))}</h2><div class="sub">${esc(ev.name)}</div></div>
       <div class="mv-block"><div class="icon">🏁</div><div><div class="lbl">Your Heat</div><div class="big">${esc(p.division)} · Heat ${heat.heatNumberInDivision}</div></div></div>
       <div class="mv-block"><div class="icon">⏰</div><div><div class="lbl">Scheduled Start</div><div class="big">${fmt12(heat.time)}</div></div></div>
-      ${diffMin>0 ? `<div class="mv-block"><div class="icon">⏳</div><div><div class="lbl">Starts In</div><div class="big">${diffMin<60?diffMin+" min":Math.floor(diffMin/60)+"h "+(diffMin%60)+"m"}</div></div></div>` : ""}
       <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">Recommended Arrival</div><div class="big">${fmt12(addMinutes(heat.time,-30))}</div></div></div>`;
   } else {
     statusBlock = `<div class="mv-hero"><h2>👋 Hi ${esc(fullName(p))}</h2><div class="sub">${esc(ev.name)}</div></div>
@@ -2344,6 +2343,7 @@ function showLogin(){
   document.getElementById("adminPasswordError").style.display = "none";
   document.getElementById("adminEmailInput").value = "";
   document.getElementById("adminPasswordInput").value = "";
+  ["btnAdminLogin","btnVolunteerLogin","btnParticipantLogin"].forEach(bid=> document.getElementById(bid).classList.remove("primary"));
   const vs = document.getElementById("volunteerSelect");
   vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
   const ps = document.getElementById("participantSelect");
@@ -2379,7 +2379,13 @@ function tryAdminLogin(){
     .catch((err)=>{ console.error("Admin sign-in failed", err); showError(); })
     .finally(()=>{ btn.disabled = false; btn.textContent = "Continue"; });
 }
+function setActiveRoleButton(id){
+  ["btnAdminLogin","btnVolunteerLogin","btnParticipantLogin"].forEach(bid=>{
+    document.getElementById(bid).classList.toggle("primary", bid===id);
+  });
+}
 document.getElementById("btnAdminLogin").addEventListener("click", ()=>{
+  setActiveRoleButton("btnAdminLogin");
   document.getElementById("volunteerPicker").classList.add("hidden");
   document.getElementById("participantPicker").classList.add("hidden");
   document.getElementById("adminPasswordPrompt").classList.remove("hidden");
@@ -2390,6 +2396,7 @@ document.getElementById("btnAdminContinue").addEventListener("click", tryAdminLo
 document.getElementById("adminPasswordInput").addEventListener("keydown", (e)=>{ if(e.key==="Enter") tryAdminLogin(); });
 document.getElementById("adminEmailInput").addEventListener("keydown", (e)=>{ if(e.key==="Enter") document.getElementById("adminPasswordInput").focus(); });
 document.getElementById("btnVolunteerLogin").addEventListener("click", ()=>{
+  setActiveRoleButton("btnVolunteerLogin");
   document.getElementById("adminPasswordPrompt").classList.add("hidden");
   document.getElementById("participantPicker").classList.add("hidden");
   document.getElementById("volunteerPicker").classList.remove("hidden");
@@ -2398,6 +2405,7 @@ document.getElementById("btnVolunteerContinue").addEventListener("click", ()=>{
   DB.role="volunteer"; DB.currentVolunteerId = document.getElementById("volunteerSelect").value; saveDB(true); enterApp();
 });
 document.getElementById("btnParticipantLogin").addEventListener("click", ()=>{
+  setActiveRoleButton("btnParticipantLogin");
   document.getElementById("adminPasswordPrompt").classList.add("hidden");
   document.getElementById("volunteerPicker").classList.add("hidden");
   document.getElementById("participantPicker").classList.remove("hidden");
