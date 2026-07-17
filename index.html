@@ -769,8 +769,8 @@ const TABS = [
   {id:"heatgen", label:"Schedule", adminOnly:true, staffOk:false},
   {id:"volunteers", label:"Volunteers", adminOnly:true, staffOk:false},
   {id:"stations", label:"Stations", adminOnly:true, staffOk:false},
-  {id:"results", label:"Results", adminOnly:true, staffOk:false},
-  {id:"schedule", label:"Full Schedule", adminOnly:false, staffOk:false},
+  {id:"results", label:"Results", adminOnly:true, staffOk:true},
+  {id:"schedule", label:"Full Schedule", adminOnly:false, staffOk:true},
   {id:"settings", label:"Settings", adminOnly:true, staffOk:false}
 ];
 
@@ -1884,7 +1884,7 @@ function renderSettingsTab(main){
       <div class="section-title"><h3>Signed in as</h3></div>
       ${currentUser ? `
         <div style="font-size:14px;margin-bottom:6px;">📧 <b>${esc(currentUser.email)}</b> <span class="badge ${isFullAdmin()?'green':'orange'}">${isFullAdmin()?'Full Admin':'Staff (restricted)'}</span></div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${isFullAdmin() ? "Full access to every tab and setting." : "Restricted tier — Dashboard, Check-In, and Live only. Sponsors, Participants, Schedule editing, Volunteers/Stations, Results, and Settings are hidden."}</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${isFullAdmin() ? "Full access to every tab and setting." : "Restricted tier — Dashboard, Check-In, Live, Full Schedule (read-only), and Results. Sponsors, Participants, Schedule editing, Volunteers/Stations, and Settings are hidden. Can add/edit a partner's name at check-in, but not division, pricing, payment status, or scheduling constraints."}</div>
         <div class="toolbar">
           <button class="small danger" id="btnSettingsSignOut">Sign Out</button>
         </div>
@@ -2243,7 +2243,18 @@ function undoCheckIn(pid){
   p.checkedIn = false; p.checkedInAt = null;
   saveDB(); renderAll();
 }
+// Deliberately narrow: front desk can fix the team/partner name at check-in
+// without touching pricing, payment status, division, or scheduling constraints
+// (that stays in the full Participants editor, which staff accounts don't see).
+function updateParticipantTeamInfo(pid, teamName, partnerNames){
+  const ev = curEvent();
+  const p = ev.participants.find(x=>x.id===pid); if(!p) return;
+  p.teamName = teamName.trim();
+  p.partnerNames = partnerNames.trim();
+  saveDB(); renderAll();
+}
 let checkInSearch = "";
+let checkInEditingId = null;
 function renderCheckInTab(main){
   const ev = curEvent();
   const q = checkInSearch.trim().toLowerCase();
@@ -2270,8 +2281,16 @@ function renderCheckInTab(main){
         <tr><th>Name</th><th>Division</th><th>Heat</th><th>Status</th><th></th></tr>
         ${!list.length ? `<tr><td colspan="5" style="color:var(--muted);">No matches.</td></tr>` : list.map(p=>{
           const h = heatOf(p.id);
+          const isTeam = p.division.indexOf("Doubles")!==-1 || p.division==="Relay";
+          const editing = checkInEditingId===p.id;
           return `<tr>
-            <td>${esc(teamLabel(p))}</td>
+            <td>${esc(teamLabel(p))}${isTeam?` <button class="small" data-edit-team="${p.id}" title="Add/edit partner name">${editing?'✕':'✏️'}</button>`:""}
+              ${editing ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+                <input id="ci_team_${p.id}" placeholder="Team name (optional)" value="${esc(p.teamName||'')}" style="max-width:160px;">
+                <input id="ci_partners_${p.id}" placeholder="Partner name(s), comma-separated" value="${esc(p.partnerNames||'')}" style="max-width:220px;">
+                <button class="small primary" data-save-team="${p.id}">Save</button>
+              </div>` : ""}
+            </td>
             <td>${esc(p.division)}</td>
             <td>${h?fmt12(h.time)+" · Heat "+h.heatNumberInDivision:"—"}</td>
             <td>${p.checkedIn ? `<span class="badge green">✓ Checked in ${new Date(p.checkedInAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>` : `<span class="badge gray">Not here yet</span>`}</td>
@@ -2287,6 +2306,18 @@ function renderCheckInTab(main){
   searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length);
   document.querySelectorAll("[data-checkin]").forEach(b=> b.addEventListener("click", ()=> checkInParticipant(b.dataset.checkin)));
   document.querySelectorAll("[data-undo-checkin]").forEach(b=> b.addEventListener("click", ()=> undoCheckIn(b.dataset.undoCheckin)));
+  document.querySelectorAll("[data-edit-team]").forEach(b=>{
+    b.addEventListener("click", ()=>{ checkInEditingId = checkInEditingId===b.dataset.editTeam ? null : b.dataset.editTeam; renderAll(); });
+  });
+  document.querySelectorAll("[data-save-team]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const pid = b.dataset.saveTeam;
+      const teamName = document.getElementById("ci_team_"+pid).value;
+      const partnerNames = document.getElementById("ci_partners_"+pid).value;
+      checkInEditingId = null;
+      updateParticipantTeamInfo(pid, teamName, partnerNames);
+    });
+  });
 }
 
 /* =========================================================================
