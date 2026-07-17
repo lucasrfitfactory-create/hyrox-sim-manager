@@ -349,6 +349,7 @@ function initCloudSync(){
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       renderAll();
+      refreshLoginScreenIfVisible();
     } else {
       // First device to connect seeds the cloud with whatever is stored locally.
       cloudDocRef.set({events: DB.events, updatedAt: firebase.firestore.FieldValue.serverTimestamp()});
@@ -365,6 +366,7 @@ function initCloudSync(){
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
       renderAll();
+      refreshLoginScreenIfVisible();
     }, err=>{
       console.error("Firestore listen failed", err);
       updateSyncBadge("Cloud sync error — check Firestore rules/connection");
@@ -2605,6 +2607,20 @@ function logout(){
   DB.role=null; DB.currentVolunteerId=null; DB.currentParticipantId=null; saveDB();
   if(CLOUD_ENABLED && firebase.auth().currentUser){ firebase.auth().signOut(); }
   showLogin();
+}
+/* Cloud data (participants, divisions, etc.) arrives asynchronously after
+   page load. If the visitor is still sitting on the login/name-picker screen
+   when it arrives, the picker was built from stale/empty local data and
+   needs to be refreshed in place — otherwise names picked before the real
+   data lands fail with "we couldn't find your registration" until they hit
+   Switch User and reload the screen. This re-populates the picker's lists
+   without resetting anything the visitor has already typed. */
+function refreshLoginScreenIfVisible(){
+  if(DB.role) return; // already logged in — nothing to refresh
+  if(document.getElementById("loginScreen").style.display === "none") return;
+  const vs = document.getElementById("volunteerSelect");
+  if(vs) vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
+  renderParticipantResults();
 }
 function showLogin(){
   document.getElementById("appShell").style.display = "none";
