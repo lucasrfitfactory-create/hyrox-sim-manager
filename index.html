@@ -364,9 +364,8 @@ function fullName(p){ return (p.firstName||"")+" "+(p.lastName||""); }
 function evStations(ev){ return (ev.stations && ev.stations.length) ? ev.stations : DEFAULT_STATIONS; }
 function validEmail(e){ return !e || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
 function teamLabel(p){
-  if(p.division==="Relay") return p.teamName || fullName(p);
+  if(p.division==="Relay") return fullName(p) + (p.partnerNames ? " & " + p.partnerNames : "");
   if(p.division.indexOf("Doubles")!==-1){
-    if(p.teamName) return p.teamName;
     return fullName(p) + " & " + (p.partnerNames ? p.partnerNames : "partner");
   }
   return fullName(p);
@@ -465,7 +464,7 @@ function seedDemoData(ev){
   demoP.forEach(([f,l,mem,div])=>{
     ev.participants.push({
       id: uid(), firstName:f, lastName:l, email:(f+"."+l+"@example.com").toLowerCase(), phone:"555-000-0000",
-      memberStatus: mem, division: div, teamName:"", partnerNames:"", constraints:[],
+      memberStatus: mem, division: div, partnerNames:"", constraints:[],
       priceOverride:null, discount:0, paymentStatus:"Paid"
     });
   });
@@ -1159,7 +1158,7 @@ function paymentBadge(status){
 }
 function openParticipantModal(participant){
   const ev = curEvent();
-  const p = participant || {id:null, firstName:"",lastName:"",email:"",phone:"",memberStatus:"Member",division:DIVISIONS[0],teamName:"",partnerNames:"",constraints:[],priceOverride:null,discount:0,paymentStatus:"Pending"};
+  const p = participant || {id:null, firstName:"",lastName:"",email:"",phone:"",memberStatus:"Member",division:DIVISIONS[0],partnerNames:"",constraints:[],priceOverride:null,discount:0,paymentStatus:"Pending"};
   openModal(`
     <h2>${participant?"Edit":"Add"} Participant</h2>
     <div class="form-grid">
@@ -1169,7 +1168,6 @@ function openParticipantModal(participant){
       <div class="form-row"><label>Phone</label><input type="tel" id="f_phone" value="${esc(p.phone)}"></div>
       <div class="form-row"><label>Member Status</label><select id="f_member"><option ${p.memberStatus==='Member'?'selected':''}>Member</option><option ${p.memberStatus==='Non-member'?'selected':''}>Non-member</option></select></div>
       <div class="form-row"><label>Division</label><select id="f_div">${DIVISIONS.map(d=>`<option ${d===p.division?'selected':''}>${d}</option>`).join("")}</select></div>
-      <div class="form-row"><label>Team Name (doubles/relay)</label><input id="f_team" value="${esc(p.teamName)}"></div>
       <div class="form-row"><label>Partner Names</label><input id="f_partners" value="${esc(p.partnerNames)}"></div>
       <div class="form-row"><label>Payment Status</label><select id="f_pay">${PAYMENT_STATUSES.map(s=>`<option ${s===p.paymentStatus?'selected':''}>${s}</option>`).join("")}</select></div>
       <div class="form-row"><label>Discount ($)</label><input id="f_discount" type="number" value="${p.discount||0}"></div>
@@ -1230,7 +1228,6 @@ function saveParticipant(id){
     phone: document.getElementById("f_phone").value.trim(),
     memberStatus: document.getElementById("f_member").value,
     division: document.getElementById("f_div").value,
-    teamName: document.getElementById("f_team").value.trim(),
     partnerNames: document.getElementById("f_partners").value.trim(),
     paymentStatus: document.getElementById("f_pay").value,
     discount: Number(document.getElementById("f_discount").value)||0,
@@ -1266,7 +1263,6 @@ function handleCsvImport(e){
         phone: row["Phone"]||row.phone||"",
         memberStatus: row["Member Status"]||row.memberStatus||"Non-member",
         division: row["Division"]||row.division||DIVISIONS[0],
-        teamName: row["Team Name"]||row.teamName||"",
         partnerNames: row["Partner Names"]||row.partnerNames||"",
         constraints: [],
         discount: Number(row["Discount"]||row.discount)||0,
@@ -2246,10 +2242,9 @@ function undoCheckIn(pid){
 // Deliberately narrow: front desk can fix the team/partner name at check-in
 // without touching pricing, payment status, division, or scheduling constraints
 // (that stays in the full Participants editor, which staff accounts don't see).
-function updateParticipantTeamInfo(pid, teamName, partnerNames){
+function updateParticipantTeamInfo(pid, partnerNames){
   const ev = curEvent();
   const p = ev.participants.find(x=>x.id===pid); if(!p) return;
-  p.teamName = teamName.trim();
   p.partnerNames = partnerNames.trim();
   saveDB(); renderAll();
 }
@@ -2264,7 +2259,6 @@ function renderCheckInTab(main){
     list = list.filter(p=>
       fullName(p).toLowerCase().includes(q) ||
       (p.email||"").toLowerCase().includes(q) ||
-      (p.teamName||"").toLowerCase().includes(q) ||
       (p.partnerNames||"").toLowerCase().includes(q)
     );
   }
@@ -2286,7 +2280,6 @@ function renderCheckInTab(main){
           return `<tr>
             <td>${esc(teamLabel(p))}${isTeam?` <button class="small" data-edit-team="${p.id}" title="Add/edit partner name">${editing?'✕':'✏️'}</button>`:""}
               ${editing ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-                <input id="ci_team_${p.id}" placeholder="Team name (optional)" value="${esc(p.teamName||'')}" style="max-width:160px;">
                 <input id="ci_partners_${p.id}" placeholder="Partner name(s), comma-separated" value="${esc(p.partnerNames||'')}" style="max-width:220px;">
                 <button class="small primary" data-save-team="${p.id}">Save</button>
               </div>` : ""}
@@ -2312,10 +2305,9 @@ function renderCheckInTab(main){
   document.querySelectorAll("[data-save-team]").forEach(b=>{
     b.addEventListener("click", ()=>{
       const pid = b.dataset.saveTeam;
-      const teamName = document.getElementById("ci_team_"+pid).value;
       const partnerNames = document.getElementById("ci_partners_"+pid).value;
       checkInEditingId = null;
-      updateParticipantTeamInfo(pid, teamName, partnerNames);
+      updateParticipantTeamInfo(pid, partnerNames);
     });
   });
 }
