@@ -178,9 +178,9 @@ tr:hover td{background:var(--bg3);}
 <!-- ================= LOGIN SCREEN ================= -->
 <div id="loginScreen">
   <div class="login-card">
-    <h1>🏋️ HYROX Simulation Manager</h1>
-    <p>Fit Factory — recurring event operations hub</p>
-    <div class="role-btns">
+    <h1 id="loginTitle">🏋️ HYROX Simulation Manager</h1>
+    <p id="loginSubtitle">Fit Factory — recurring event operations hub</p>
+    <div class="role-btns" id="roleBtns">
       <button class="primary" id="btnAdminLogin">Admin</button>
       <button id="btnVolunteerLogin">Volunteer</button>
       <button id="btnParticipantLogin">Athlete</button>
@@ -260,6 +260,12 @@ const CONSTRAINT_TYPES = [
   {v:"manualLock", label:"Manual lock (fixed heat)"}
 ];
 const STORE_KEY = "hyroxSimApp_v1";
+
+/* If this page is loaded with ?view=athlete (used by dedicated athlete-facing
+   pages/links, e.g. fitfactoryfitness.com/hyrox-august-athlete embedding this
+   same app with that query string appended), skip straight to the athlete
+   name picker instead of showing the Admin/Volunteer/Athlete choice. */
+const DIRECT_ATHLETE_MODE = new URLSearchParams(window.location.search).get("view") === "athlete";
 
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
@@ -2560,6 +2566,12 @@ function showLogin(){
   vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
   const ps = document.getElementById("participantSelect");
   ps.innerHTML = curEvent().participants.map(p=>`<option value="${p.id}">${esc(teamLabel(p))} (${esc(p.division)})</option>`).join("");
+  if(DIRECT_ATHLETE_MODE){
+    document.getElementById("roleBtns").style.display = "none";
+    document.getElementById("loginTitle").textContent = "🏁 " + curEvent().name;
+    document.getElementById("loginSubtitle").textContent = "Find your heat time — select your name below";
+    document.getElementById("participantPicker").classList.remove("hidden");
+  }
 }
 function enterApp(){
   document.getElementById("loginScreen").style.display = "none";
