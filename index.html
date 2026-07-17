@@ -366,6 +366,7 @@ function defaultEvent(name, dateStr){
     startTime: "08:00", heatInterval: 10, raceDuration: 100,
     sponsors: [], volunteers: [], participants: [], heats: [],
     stationAssignments: [], roleAssignments: [], stations: DEFAULT_STATIONS.slice(),
+    results: [],
     createdAt: Date.now()
   };
 }
@@ -735,7 +736,10 @@ const TABS = [
   {id:"heatgen", label:"Schedule", adminOnly:true},
   {id:"volunteers", label:"Volunteers", adminOnly:true},
   {id:"stations", label:"Stations", adminOnly:true},
-  {id:"schedule", label:"Full Schedule", adminOnly:false}
+  {id:"live", label:"Live", adminOnly:true},
+  {id:"results", label:"Results", adminOnly:true},
+  {id:"schedule", label:"Full Schedule", adminOnly:false},
+  {id:"settings", label:"Settings", adminOnly:true}
 ];
 
 function renderTabsNav(){
@@ -759,7 +763,10 @@ function renderAll(){
   else if(currentTab==="heatgen") renderHeatGen(main);
   else if(currentTab==="volunteers") renderVolunteers(main);
   else if(currentTab==="stations") renderStationsTab(main);
+  else if(currentTab==="live") renderLiveTab(main);
+  else if(currentTab==="results") renderResultsTab(main);
   else if(currentTab==="schedule") renderSchedule(main);
+  else if(currentTab==="settings") renderSettingsTab(main);
 }
 
 function renderEventSelect(){
@@ -1279,29 +1286,81 @@ function renderHeatGen(main){
       <div class="section-title"><h3>Schedule</h3>${help("Grouped by division in run order. Drag a participant chip onto another heat's column to move them, or use the '+ add participant' dropdown at the bottom of a heat to place someone directly. Click the ✕ on a chip to pull them out of a heat without deleting their record. Locked/manual-locked participants are marked and should be moved carefully.")}</div>
       <div id="heatSchedule">${ev.heats.length ? DIVISIONS.map(div=>{
         const divHeats = ev.heats.filter(h=>h.division===div);
-        if(!divHeats.length) return "";
         return `<div class="division-group">
-          <div class="division-group-title">${esc(div)} <span class="badge gray">${divHeats.length} heat${divHeats.length!==1?'s':''}</span></div>
-          <div class="heat-schedule-wrap">${divHeats.map(h=>heatColHtml(ev,h)).join("")}</div>
+          <div class="division-group-title" style="display:flex;align-items:center;gap:8px;">
+            <span>${esc(div)}</span> <span class="badge gray">${divHeats.length} heat${divHeats.length!==1?'s':''}</span>
+            <button class="small addHeatBtn" data-division="${esc(div)}" data-after="${divHeats.length?divHeats[divHeats.length-1].id:''}" title="Add a heat at the end of ${esc(div)} — everything after it shifts later">+ Add Heat</button>
+          </div>
+          ${divHeats.length ? `<div class="heat-schedule-wrap">${divHeats.map(h=>heatColHtml(ev,h)).join("")}</div>` : `<div style="color:var(--muted);font-size:12px;">No heats yet in this division.</div>`}
         </div>`;
       }).join("") : "<div style='color:var(--muted)'>No schedule generated yet.</div>"}</div>
     </div>
   `;
   document.getElementById("btnGenerate").addEventListener("click", ()=>{
+    const hasExisting = ev.heats.length || ev.stationAssignments.length || ev.roleAssignments.length;
+    if(hasExisting && !confirm("This regenerates the FULL schedule from scratch, based on current participant lists. Any manual moves, added/removed heats, and station/role assignments will be wiped and rebuilt. This can't be undone with the reset button (though Ctrl+Z will still work once). Continue?")) return;
     ev.startTime = document.getElementById("hg_start").value || ev.startTime;
     ev.heatInterval = Number(document.getElementById("hg_interval").value)||ev.heatInterval;
     ev.raceDuration = Number(document.getElementById("hg_duration").value)||ev.raceDuration;
     generateHeats(ev);
     saveDB(); renderAll();
   });
+  document.querySelectorAll(".addHeatBtn").forEach(btn=>{
+    btn.addEventListener("click", ()=> insertHeat(btn.dataset.division, btn.dataset.after || null));
+  });
   wireHeatDragDrop();
   wireAddToHeat();
+}
+function rebuildHeatTimesAndNumbers(ev){
+  let t = ev.startTime;
+  const byDiv = {};
+  DIVISIONS.forEach(d=>byDiv[d]=[]);
+  ev.heats.forEach(h=>{ if(byDiv[h.division]) byDiv[h.division].push(h); });
+  const ordered = [];
+  DIVISIONS.forEach(div=>{
+    byDiv[div].forEach((h,i)=>{
+      h.heatNumberInDivision = i+1;
+      h.time = t;
+      t = addMinutes(t, ev.heatInterval);
+      ordered.push(h);
+    });
+  });
+  ev.heats = ordered;
+}
+function insertHeat(division, afterHeatId){
+  const ev = curEvent();
+  pushUndo();
+  const newHeat = { id: uid(), division, heatNumberInDivision: 0, time: "00:00", participantIds: [] };
+  if(afterHeatId){
+    const idx = ev.heats.findIndex(h=>h.id===afterHeatId);
+    ev.heats.splice(idx+1, 0, newHeat);
+  } else {
+    const firstIdx = ev.heats.findIndex(h=>h.division===division);
+    if(firstIdx>=0) ev.heats.splice(firstIdx,0,newHeat);
+    else ev.heats.push(newHeat);
+  }
+  rebuildHeatTimesAndNumbers(ev);
+  saveDB(); renderAll();
+}
+function removeHeat(heatId){
+  const ev = curEvent();
+  const h = ev.heats.find(x=>x.id===heatId);
+  if(!h) return;
+  const msg = h.participantIds.length
+    ? `This heat still has ${h.participantIds.length} participant(s) in it — they'll be pulled out and need to be re-placed manually. Every later heat shifts ${ev.heatInterval} min earlier. Remove it anyway?`
+    : `Remove this empty heat? Every later heat shifts ${ev.heatInterval} min earlier.`;
+  if(!confirm(msg)) return;
+  pushUndo();
+  ev.heats = ev.heats.filter(x=>x.id!==heatId);
+  ev.stationAssignments = ev.stationAssignments.filter(a=>a.heatId!==heatId);
+  rebuildHeatTimesAndNumbers(ev);
+  saveDB(); renderAll();
 }
 function heatColHtml(ev, h){
   const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
   const candidates = ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id));
   return `<div class="heat-col" data-heat="${h.id}">
-    <div class="heat-header"><span>${esc(h.division)} · Heat ${h.heatNumberInDivision}</span><span class="heat-time">${fmt12(h.time)}</span></div>
+    <div class="heat-header"><span>${esc(h.division)} · Heat ${h.heatNumberInDivision}</span><span class="heat-time">${fmt12(h.time)}</span><button class="small danger removeHeatBtn" data-heat="${h.id}" title="Remove this heat — later heats shift earlier" style="padding:0 5px;">🗑</button></div>
     ${parts.map(p=>`<div class="participant-chip openParticipantChip ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" draggable="true" data-pid="${p.id}" title="Click to open/edit this participant">
       <span>${esc(teamLabel(p))}</span>
       <span style="display:flex;gap:4px;align-items:center;">
@@ -1365,6 +1424,9 @@ function wireAddToHeat(){
       if(h){ const idx = h.participantIds.indexOf(btn.dataset.pid); if(idx>=0) h.participantIds.splice(idx,1); }
       saveDB(); renderAll();
     });
+  });
+  document.querySelectorAll(".removeHeatBtn").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{ e.stopPropagation(); removeHeat(btn.dataset.heat); });
   });
 }
 
@@ -1586,6 +1648,15 @@ function renderStationsTab(main){
         ${stations.map(s=>`<span class="badge gray" style="display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 10px;">${esc(s)} <button class="small danger removeStationBtn" data-station="${esc(s)}" style="padding:1px 6px;">✕</button></span>`).join("")}
       </div>
     </div>
+    <div class="card">
+      <div class="section-title"><h3>Assign Whole Day</h3>${help("Instead of setting a station heat-by-heat, put someone on a station for every heat in one click. If they're also racing, the heats overlapping their own race window are automatically skipped — everything else gets filled.")}</div>
+      <div class="toolbar">
+        <select id="wd_volunteer"><option value="">Select volunteer…</option>${ev.volunteers.map(v=>`<option value="${v.id}">${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}</select>
+        <span style="color:var(--muted);">→</span>
+        <select id="wd_station">${stations.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select>
+        <button class="primary" id="btnAssignWholeDay">Assign for Whole Day</button>
+      </div>
+    </div>
     <div class="card table-wrap">
       <div class="section-title"><h3>Coverage by Heat</h3>${help("One row per heat, one column per station. Pick a volunteer from each dropdown to assign them manually. Choosing '— Unassigned —' clears that slot. Use the filters below if the full grid is too much at once.")}</div>
       <div class="toolbar">
@@ -1663,6 +1734,34 @@ function renderStationsTab(main){
       manualAssignStation(sel.dataset.heat, sel.dataset.station, sel.value);
     });
   });
+  document.getElementById("btnAssignWholeDay").addEventListener("click", ()=>{
+    const volId = document.getElementById("wd_volunteer").value;
+    const station = document.getElementById("wd_station").value;
+    if(!volId){ alert("Pick a volunteer first."); return; }
+    if(!ev.heats.length){ alert("Generate the heat schedule first."); return; }
+    assignVolunteerWholeDay(ev, volId, station);
+  });
+}
+function assignVolunteerWholeDay(ev, volId, station){
+  const vol = ev.volunteers.find(v=>v.id===volId);
+  pushUndo();
+  let assigned = 0, skippedRacing = 0, skippedOther = 0;
+  ev.heats.forEach(h=>{
+    const check = canAssignVolunteer(ev, volId, h.id);
+    if(!check.ok){
+      if(check.reason && check.reason.toLowerCase().includes("racing")) skippedRacing++;
+      else skippedOther++;
+      return;
+    }
+    let a = ev.stationAssignments.find(x=>x.heatId===h.id && x.station===station);
+    if(a){ a.volunteerId = volId; } else { ev.stationAssignments.push({id:uid(), heatId:h.id, station, volunteerId:volId}); }
+    assigned++;
+  });
+  saveDB(); renderAll();
+  let msg = `${vol.name} assigned to ${station} for ${assigned} of ${ev.heats.length} heats.`;
+  if(skippedRacing) msg += ` Skipped ${skippedRacing} during their own race window.`;
+  if(skippedOther) msg += ` Skipped ${skippedOther} due to a conflicting role or assignment elsewhere.`;
+  alert(msg);
 }
 function removeStation(name){
   if(!confirm(`Remove station "${name}"? Any existing assignments to it will be cleared.`)) return;
@@ -1714,6 +1813,358 @@ function detectMissingRoleCoverage(ev){
     if(filled<count) missing.push({role, filled, needed:count});
   });
   return missing;
+}
+
+/* =========================================================================
+   SETTINGS TAB — account info, event management, honest limitations
+   ========================================================================= */
+function renderSettingsTab(main){
+  const events = Object.values(DB.events);
+  const currentUser = (CLOUD_ENABLED && firebase.auth().currentUser) ? firebase.auth().currentUser : null;
+  const consoleUrl = CLOUD_ENABLED ? `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/users` : null;
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title"><h2>Settings</h2>${help("Account info and event management live here. Adding/removing admin accounts has to happen in the Firebase console — this app has no backend of its own to safely manage other people's logins, so this page links you there instead of faking a feature that can't actually work client-side.")}</div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Signed in as</h3></div>
+      ${currentUser ? `
+        <div style="font-size:14px;margin-bottom:10px;">📧 <b>${esc(currentUser.email)}</b></div>
+        <div class="toolbar">
+          <button class="small danger" id="btnSettingsSignOut">Sign Out</button>
+        </div>
+      ` : `<div style="color:var(--muted);font-size:13px;">Cloud sync isn't configured, so there's no real account — this is local-only mode.</div>`}
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Other admin accounts</h3></div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.6;">
+        This app can't list, add, or delete other admin logins from here — Firebase Authentication only lets a signed-in user manage their own session from client-side code like this. Adding a teammate as admin, or removing someone's access, has to be done directly in the Firebase console.
+      </div>
+      ${consoleUrl ? `<div class="toolbar" style="margin-top:10px;"><a href="${consoleUrl}" target="_blank" rel="noopener"><button class="small">Open Firebase Authentication Console ↗</button></a></div>` : ""}
+    </div>
+
+    ${currentUser ? `
+    <div class="card">
+      <div class="section-title"><h3>Change your password</h3></div>
+      <div class="form-grid">
+        <div class="form-row"><label>New password</label><input type="password" id="st_newpass" autocomplete="new-password"></div>
+        <div class="form-row"><label>Confirm new password</label><input type="password" id="st_newpass2" autocomplete="new-password"></div>
+      </div>
+      <div class="toolbar">
+        <button class="primary" id="btnChangePassword">Update Password</button>
+        <span id="st_passMsg" style="font-size:12px;"></span>
+      </div>
+    </div>` : ""}
+
+    <div class="card">
+      <div class="section-title"><h3>Events</h3>${help("Every event this app knows about, across all your simulation dates. Deleting an event permanently removes its participants, volunteers, heats, and assignments from the shared cloud database — there's no recycle bin.")}</div>
+      <div class="toolbar"><button class="primary" id="btnSettingsNewEvent">+ New Event</button></div>
+      <table>
+        <tr><th>Event</th><th>Date</th><th></th></tr>
+        ${events.map(e=>`<tr>
+          <td>${e.id===DB.currentEventId?'<span class="badge green">Current</span> ':''}${esc(e.name)}</td>
+          <td>${esc(e.date)}</td>
+          <td style="display:flex;gap:6px;">
+            <button class="small" data-rename="${e.id}">Rename</button>
+            <button class="small" data-switch="${e.id}" ${e.id===DB.currentEventId?'disabled':''}>Switch to</button>
+            <button class="small danger" data-delete="${e.id}" ${events.length<=1?'disabled title="Cannot delete the only event"':''}>Delete</button>
+          </td>
+        </tr>`).join("")}
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Sync status</h3></div>
+      <div style="font-size:13px;color:var(--muted);">${CLOUD_ENABLED ? `Connected to Firestore project <b>${esc(firebaseConfig.projectId)}</b>. Reads are open to anyone with the link; writes require a signed-in admin account.` : "Cloud sync is not configured — this device is running in local-only mode."}</div>
+    </div>
+  `;
+  const signOutBtn = document.getElementById("btnSettingsSignOut");
+  if(signOutBtn) signOutBtn.addEventListener("click", logout);
+  const changePassBtn = document.getElementById("btnChangePassword");
+  if(changePassBtn) changePassBtn.addEventListener("click", ()=>{
+    const p1 = document.getElementById("st_newpass").value;
+    const p2 = document.getElementById("st_newpass2").value;
+    const msgEl = document.getElementById("st_passMsg");
+    msgEl.textContent = "";
+    if(!p1 || p1.length<6){ msgEl.textContent = "Password must be at least 6 characters."; msgEl.style.color="var(--red)"; return; }
+    if(p1!==p2){ msgEl.textContent = "Passwords don't match."; msgEl.style.color="var(--red)"; return; }
+    firebase.auth().currentUser.updatePassword(p1)
+      .then(()=>{ msgEl.textContent = "Password updated."; msgEl.style.color="var(--green)"; document.getElementById("st_newpass").value=""; document.getElementById("st_newpass2").value=""; })
+      .catch(err=>{
+        console.error("Password update failed", err);
+        if(err.code === "auth/requires-recent-login"){ msgEl.textContent = "For security, sign out and back in, then try again."; }
+        else { msgEl.textContent = "Couldn't update password: " + err.message; }
+        msgEl.style.color = "var(--red)";
+      });
+  });
+  const newEventBtn = document.getElementById("btnSettingsNewEvent");
+  if(newEventBtn) newEventBtn.addEventListener("click", ()=> document.getElementById("btnNewEvent").click());
+  document.querySelectorAll("[data-switch]").forEach(b=>{
+    b.addEventListener("click", ()=>{ DB.currentEventId = b.dataset.switch; saveDB(); renderAll(); });
+  });
+  document.querySelectorAll("[data-rename]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const ev = DB.events[b.dataset.rename];
+      const name = prompt("Event name:", ev.name);
+      if(!name) return;
+      ev.name = name; saveDB(); renderAll();
+    });
+  });
+  document.querySelectorAll("[data-delete]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const ev = DB.events[b.dataset.delete];
+      if(Object.keys(DB.events).length<=1){ alert("Can't delete the only event."); return; }
+      if(!confirm(`Permanently delete "${ev.name}"? This removes all its participants, volunteers, heats, and results. This cannot be undone.`)) return;
+      delete DB.events[b.dataset.delete];
+      if(DB.currentEventId===b.dataset.delete) DB.currentEventId = Object.keys(DB.events)[0];
+      saveDB(); renderAll();
+    });
+  });
+}
+
+/* =========================================================================
+   LIVE TAB — race-day timers, start/stop, manual overrides
+   ========================================================================= */
+function fmtElapsed(ms){
+  if(ms<0) ms=0;
+  const totalSec = Math.floor(ms/1000);
+  const h = Math.floor(totalSec/3600);
+  const m = Math.floor((totalSec%3600)/60);
+  const s = totalSec%60;
+  return (h>0 ? String(h).padStart(2,"0")+":" : "") + String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+}
+function heatScheduledTs(ev, h){ return new Date(ev.date+"T"+h.time+":00").getTime(); }
+function checkAutoStartHeats(){
+  if(!DB) return;
+  const ev = curEvent(); if(!ev || !ev.heats) return;
+  const todayStr = new Date().toISOString().slice(0,10);
+  if(ev.date !== todayStr) return;
+  const now = Date.now();
+  let changed = false;
+  ev.heats.forEach(h=>{
+    if(h.actualStartTs) return;
+    const scheduledTs = heatScheduledTs(ev, h);
+    if(now >= scheduledTs){ h.actualStartTs = scheduledTs; h.actualStartSource = "auto"; changed = true; }
+  });
+  if(changed) saveDB();
+}
+function startHeatNow(heatId){
+  const ev = curEvent();
+  const h = ev.heats.find(x=>x.id===heatId); if(!h) return;
+  h.actualStartTs = Date.now(); h.actualStartSource = "manual";
+  saveDB(); renderAll();
+}
+function setHeatStartOverride(heatId, hhmm){
+  if(!hhmm){ alert("Enter a time first."); return; }
+  const ev = curEvent();
+  const h = ev.heats.find(x=>x.id===heatId); if(!h) return;
+  const ts = new Date(ev.date+"T"+hhmm+":00").getTime();
+  if(isNaN(ts)){ alert("Invalid time."); return; }
+  h.actualStartTs = ts; h.actualStartSource = "override";
+  saveDB(); renderAll();
+}
+function resetHeatStart(heatId){
+  if(!confirm("Reset this heat's start? Any finish times already recorded for this heat will be cleared too, since they're calculated from the start time.")) return;
+  const ev = curEvent();
+  const h = ev.heats.find(x=>x.id===heatId); if(!h) return;
+  h.actualStartTs = null; h.actualStartSource = null;
+  ev.results = (ev.results||[]).filter(r=>r.heatId!==heatId);
+  saveDB(); renderAll();
+}
+function recordFinish(heatId, participantId){
+  const ev = curEvent();
+  const h = ev.heats.find(x=>x.id===heatId);
+  if(!h || !h.actualStartTs){ alert("This heat hasn't started yet."); return; }
+  const elapsedMs = Date.now() - h.actualStartTs;
+  if(!ev.results) ev.results = [];
+  let r = ev.results.find(x=>x.participantId===participantId && x.heatId===heatId);
+  if(r){ r.elapsedMs = elapsedMs; r.savedAt = Date.now(); }
+  else { ev.results.push({id:uid(), heatId, participantId, elapsedMs, savedAt: Date.now()}); }
+  saveDB(); renderAll();
+}
+function undoFinish(heatId, participantId){
+  const ev = curEvent();
+  ev.results = (ev.results||[]).filter(r=>!(r.heatId===heatId && r.participantId===participantId));
+  saveDB(); renderAll();
+}
+function updateLiveTimers(){
+  document.querySelectorAll("[data-live-timer]").forEach(el=>{
+    const startTs = Number(el.dataset.liveTimer);
+    if(!startTs) return;
+    el.textContent = fmtElapsed(Date.now()-startTs);
+  });
+}
+let liveTabFilters = { hideFinished: false };
+function renderLiveTab(main){
+  const ev = curEvent();
+  const heats = ev.heats.slice().sort((a,b)=>timeToMin(a.time)-timeToMin(b.time));
+  const todayStr = new Date().toISOString().slice(0,10);
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title"><h2>Live</h2>${help("Heats auto-start at their scheduled time as long as someone has this tab open on event day — this is a browser app with no server clock running in the background, so if nobody has the page open, nothing starts automatically. Use 'Start Heat Now' if a heat needs to begin early or didn't trigger, or 'Set start time' to backdate a start you forgot to click. Click 'End Race' next to each racer as they finish to save their time.")}</div>
+      ${ev.date!==todayStr ? `<div class="warn-item orange">🟠 This event's date (${esc(ev.date)}) isn't today. Auto-start is disabled until then — use manual start/override below if you're testing or running early.</div>` : ""}
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-top:8px;"><input type="checkbox" id="liveHideFinished" ${liveTabFilters.hideFinished?'checked':''}> Hide fully finished heats</label>
+    </div>
+    ${!heats.length ? `<div class="card" style="color:var(--muted);">No heats generated yet — go to Schedule first.</div>` : heats.map(h=>{
+      const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
+      const started = !!h.actualStartTs;
+      const allFinished = started && parts.length>0 && parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id));
+      if(liveTabFilters.hideFinished && allFinished) return "";
+      const statusBadge = allFinished ? `<span class="badge green">Finished</span>` : started ? `<span class="badge orange">Racing</span>` : `<span class="badge gray">Not started</span>`;
+      return `<div class="card">
+        <div class="section-title" style="align-items:center;">
+          <h3 style="margin:0;">${esc(h.division)} · Heat ${h.heatNumberInDivision} <span style="color:var(--muted);font-weight:400;">— scheduled ${fmt12(h.time)}</span></h3>
+          ${statusBadge}
+        </div>
+        ${started ? `
+          <div style="display:flex;align-items:center;gap:14px;margin:8px 0;">
+            <div style="font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;" data-live-timer="${h.actualStartTs}">${fmtElapsed(Date.now()-h.actualStartTs)}</div>
+            <span style="font-size:11px;color:var(--muted);">started ${h.actualStartSource==="auto"?"automatically":h.actualStartSource==="override"?"via manual time override":"manually"} at ${new Date(h.actualStartTs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+            <button class="small danger" data-reset-start="${h.id}">↺ Reset Start</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            ${parts.map(p=>{
+              const r = (ev.results||[]).find(x=>x.heatId===h.id && x.participantId===p.id);
+              return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--bg3);border-radius:6px;">
+                <span>${esc(teamLabel(p))}</span>
+                ${r
+                  ? `<span style="display:flex;align-items:center;gap:8px;"><b style="font-variant-numeric:tabular-nums;">${fmtElapsed(r.elapsedMs)}</b> <span class="badge green">✓ Saved</span> <button class="small" data-undo-finish="${h.id}|${p.id}">Undo</button></span>`
+                  : `<button class="primary small" data-end-race="${h.id}|${p.id}">⏱ End Race</button>`}
+              </div>`;
+            }).join("")}
+          </div>
+        ` : `
+          <div class="toolbar">
+            <button class="primary" data-start-heat="${h.id}">▶ Start Heat Now</button>
+            <span style="color:var(--muted);">or</span>
+            <input type="time" id="override_${h.id}" style="max-width:120px;">
+            <button class="small" data-set-override="${h.id}">Set start time</button>
+          </div>
+          <div style="font-size:12px;color:var(--muted);">${parts.length} racer${parts.length!==1?'s':''} in this heat.</div>
+        `}
+      </div>`;
+    }).join("")}
+  `;
+  document.getElementById("liveHideFinished").addEventListener("change", (e)=>{ liveTabFilters.hideFinished = e.target.checked; renderAll(); });
+  document.querySelectorAll("[data-start-heat]").forEach(b=> b.addEventListener("click", ()=> startHeatNow(b.dataset.startHeat)));
+  document.querySelectorAll("[data-reset-start]").forEach(b=> b.addEventListener("click", ()=> resetHeatStart(b.dataset.resetStart)));
+  document.querySelectorAll("[data-set-override]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const val = document.getElementById("override_"+b.dataset.setOverride).value;
+      setHeatStartOverride(b.dataset.setOverride, val);
+    });
+  });
+  document.querySelectorAll("[data-end-race]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const [heatId, pid] = b.dataset.endRace.split("|");
+      recordFinish(heatId, pid);
+    });
+  });
+  document.querySelectorAll("[data-undo-finish]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const [heatId, pid] = b.dataset.undoFinish.split("|");
+      undoFinish(heatId, pid);
+    });
+  });
+}
+setInterval(()=>{
+  checkAutoStartHeats();
+  if(typeof currentTab!=="undefined" && currentTab==="live" && DB && DB.role==="admin") updateLiveTimers();
+}, 1000);
+
+/* =========================================================================
+   RESULTS TAB — saved times, sorting, leaderboard
+   ========================================================================= */
+let resultsFilters = { division:"", sort:"heat", view:"table" };
+function getResultsWithMeta(ev){
+  return (ev.results||[]).map(r=>{
+    const heat = ev.heats.find(h=>h.id===r.heatId);
+    const p = ev.participants.find(x=>x.id===r.participantId);
+    return { ...r, heat, participant: p };
+  }).filter(x=>x.participant);
+}
+function renderResultsTab(main){
+  const ev = curEvent();
+  let rows = getResultsWithMeta(ev);
+  if(resultsFilters.division) rows = rows.filter(r=>r.participant.division===resultsFilters.division);
+
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title"><h2>Results</h2>${help("Times recorded on the Live tab show up here. Switch to Leaderboard to see rankings per division. Export downloads exactly what's currently filtered/sorted.")}</div>
+      <div class="toolbar">
+        <select id="res_division"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${resultsFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
+        <select id="res_sort">
+          <option value="heat" ${resultsFilters.sort==='heat'?'selected':''}>Sort by Heat/Time started</option>
+          <option value="division" ${resultsFilters.sort==='division'?'selected':''}>Sort by Division, then Time</option>
+          <option value="time" ${resultsFilters.sort==='time'?'selected':''}>Sort by Fastest Time</option>
+        </select>
+        <div class="spacer"></div>
+        <button class="small ${resultsFilters.view==='table'?'primary':''}" id="res_viewTable">Table</button>
+        <button class="small ${resultsFilters.view==='leaderboard'?'primary':''}" id="res_viewLeaderboard">Leaderboard</button>
+        <button class="small" id="res_export">⬇ Export CSV</button>
+      </div>
+    </div>
+    ${resultsFilters.view==="table" ? renderResultsTable(rows) : renderLeaderboard(ev, resultsFilters.division)}
+  `;
+  document.getElementById("res_division").addEventListener("change",(e)=>{ resultsFilters.division=e.target.value; renderAll(); });
+  document.getElementById("res_sort").addEventListener("change",(e)=>{ resultsFilters.sort=e.target.value; renderAll(); });
+  document.getElementById("res_viewTable").addEventListener("click",()=>{ resultsFilters.view="table"; renderAll(); });
+  document.getElementById("res_viewLeaderboard").addEventListener("click",()=>{ resultsFilters.view="leaderboard"; renderAll(); });
+  document.getElementById("res_export").addEventListener("click",()=>{
+    const sorted = sortResultRows(rows.slice());
+    const csv = Papa.unparse(sorted.map(r=>({
+      Division: r.participant.division,
+      Participant: teamLabel(r.participant),
+      Heat: r.heat ? `${r.heat.division} ${r.heat.heatNumberInDivision}` : "",
+      "Heat Time": r.heat ? fmt12(r.heat.time) : "",
+      "Result Time": fmtElapsed(r.elapsedMs)
+    })));
+    download(`${ev.name.replace(/[^a-z0-9]+/gi,"_")}_results.csv`, csv);
+  });
+}
+function sortResultRows(rows){
+  if(resultsFilters.sort==="time") rows.sort((a,b)=>a.elapsedMs-b.elapsedMs);
+  else if(resultsFilters.sort==="division") rows.sort((a,b)=> a.participant.division.localeCompare(b.participant.division) || a.elapsedMs-b.elapsedMs);
+  else rows.sort((a,b)=> (a.heat?timeToMin(a.heat.time):0) - (b.heat?timeToMin(b.heat.time):0) || a.elapsedMs-b.elapsedMs);
+  return rows;
+}
+function renderResultsTable(rows){
+  const sorted = sortResultRows(rows.slice());
+  if(!sorted.length) return `<div class="card" style="color:var(--muted);">No results recorded yet — save finish times from the Live tab.</div>`;
+  return `<div class="card table-wrap">
+    <table>
+      <tr><th>Division</th><th>Participant</th><th>Heat</th><th>Heat Time</th><th>Result</th></tr>
+      ${sorted.map(r=>`<tr>
+        <td>${esc(r.participant.division)}</td>
+        <td>${esc(teamLabel(r.participant))}</td>
+        <td>${r.heat?esc(r.heat.division+" · "+r.heat.heatNumberInDivision):"—"}</td>
+        <td>${r.heat?fmt12(r.heat.time):"—"}</td>
+        <td style="font-variant-numeric:tabular-nums;font-weight:700;">${fmtElapsed(r.elapsedMs)}</td>
+      </tr>`).join("")}
+    </table>
+  </div>`;
+}
+function renderLeaderboard(ev, divisionFilter){
+  const rows = getResultsWithMeta(ev);
+  const divs = divisionFilter ? [divisionFilter] : DIVISIONS;
+  const medals = ["🥇","🥈","🥉"];
+  return divs.map(div=>{
+    const list = rows.filter(r=>r.participant.division===div).sort((a,b)=>a.elapsedMs-b.elapsedMs);
+    if(!list.length) return `<div class="card"><div class="section-title"><h3>${esc(div)}</h3></div><div style="color:var(--muted);font-size:13px;">No times recorded yet.</div></div>`;
+    return `<div class="card">
+      <div class="section-title"><h3>${esc(div)}</h3></div>
+      <table>
+        <tr><th>#</th><th>Participant</th><th>Time</th></tr>
+        ${list.map((r,i)=>`<tr>
+          <td>${medals[i]||(i+1)}</td>
+          <td>${esc(teamLabel(r.participant))}</td>
+          <td style="font-variant-numeric:tabular-nums;font-weight:700;">${fmtElapsed(r.elapsedMs)}</td>
+        </tr>`).join("")}
+      </table>
+    </div>`;
+  }).join("");
 }
 
 /* =========================================================================
