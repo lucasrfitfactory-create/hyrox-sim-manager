@@ -118,18 +118,24 @@ tr:hover td{background:var(--bg3);}
 .sponsor-card .meta{color:var(--muted);font-size:12px;margin:4px 0 10px;}
 .sponsor-card .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
 
-.heat-col{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px;min-width:220px;flex:0 1 240px;}
+.heat-col{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px;min-width:200px;flex:0 1 210px;}
 .heat-schedule{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;}
 .heat-schedule-wrap{display:flex;flex-wrap:wrap;gap:12px;}
 .division-group{margin-bottom:20px;}
 .division-group-title{font-weight:700;color:var(--accent2);margin-bottom:8px;display:flex;align-items:center;gap:8px;}
-.heat-header{font-weight:700;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;}
-.heat-time{color:var(--accent2);font-size:12px;}
+.heat-header{margin-bottom:8px;}
+.heat-header-top{display:flex;justify-content:space-between;align-items:center;}
+.heat-num{font-weight:700;font-size:13px;color:var(--muted);}
+.heat-time{color:var(--accent2);font-size:20px;font-weight:800;margin-top:2px;}
 .participant-chip{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:6px 8px;margin-bottom:6px;font-size:12px;cursor:grab;display:flex;justify-content:space-between;gap:6px;align-items:center;}
 .participant-chip.locked{border-color:var(--accent);}
 .participant-chip.dragover{border-color:var(--accent2);}
 .participant-chip .tag{font-size:9px;padding:1px 5px;border-radius:8px;background:var(--bg3);color:var(--muted);}
 .heat-col.dragover{border-color:var(--accent2);background:rgba(59,157,255,.08);}
+.live-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;}
+.live-heat-card{margin:0;}
+.live-heat-card.live-racing{border-color:var(--accent2);box-shadow:0 0 0 1px var(--accent2);}
+.live-timer{font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:1px;}
 
 .timeline{position:relative;height:60px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);margin-top:8px;overflow:hidden;}
 .timeline .block{position:absolute;top:6px;bottom:6px;border-radius:5px;font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 4px;white-space:nowrap;}
@@ -170,6 +176,7 @@ tr:hover td{background:var(--bg3);}
     <div class="role-btns">
       <button class="primary" id="btnAdminLogin">Admin</button>
       <button id="btnVolunteerLogin">Volunteer</button>
+      <button id="btnParticipantLogin">Participant</button>
     </div>
     <div id="adminPasswordPrompt" class="hidden" style="margin-top:12px;text-align:left;">
       <label style="font-size:12px;color:var(--muted);font-weight:600;">Admin email</label>
@@ -183,6 +190,11 @@ tr:hover td{background:var(--bg3);}
       <label style="font-size:12px;color:var(--muted);font-weight:600;">Select your name</label>
       <select id="volunteerSelect"></select>
       <button class="primary" style="width:100%;margin-top:10px;" id="btnVolunteerContinue">Continue</button>
+    </div>
+    <div id="participantPicker" class="hidden">
+      <label style="font-size:12px;color:var(--muted);font-weight:600;">Select your name</label>
+      <select id="participantSelect"></select>
+      <button class="primary" style="width:100%;margin-top:10px;" id="btnParticipantContinue">Continue</button>
     </div>
   </div>
 </div>
@@ -380,7 +392,7 @@ function loadDB(){
   if(!DB){
     const ev = defaultEvent("HYROX Simulation — August 9", "2026-08-09");
     seedDemoData(ev);
-    DB = { events: {[ev.id]: ev}, currentEventId: ev.id, role: null, currentVolunteerId: null };
+    DB = { events: {[ev.id]: ev}, currentEventId: ev.id, role: null, currentVolunteerId: null, currentParticipantId: null };
   }
 }
 function saveDB(immediate, skipCloud){
@@ -604,7 +616,7 @@ function timeOverlaps(t, start, end){
   const tm=timeToMin(t), s=timeToMin(start), e=timeToMin(end);
   return tm>=s && tm<e;
 }
-function canAssignVolunteer(ev, volId, heatId){
+function canAssignVolunteer(ev, volId, heatId, targetStation){
   const vol = ev.volunteers.find(v=>v.id===volId);
   if(!vol) return {ok:false, reason:"Volunteer not found."};
   const heat = ev.heats.find(h=>h.id===heatId);
@@ -620,18 +632,21 @@ function canAssignVolunteer(ev, volId, heatId){
   const heatStart = timeToMin(heat.time), heatEnd = heatStart + ev.raceDuration;
   const overlapping = ev.stationAssignments.find(a=>{
     if(a.volunteerId!==volId || a.heatId===heatId) return false;
+    // Staying at the SAME station across back-to-back/overlapping heats is normal
+    // coverage (that's the whole point of "assign for whole day"), not a conflict.
+    if(targetStation && a.station===targetStation) return false;
     const oh = ev.heats.find(h=>h.id===a.heatId); if(!oh) return false;
     const os = timeToMin(oh.time), oe = os + ev.raceDuration;
     return heatStart < oe && os < heatEnd;
   });
   if(overlapping){
     const oh = ev.heats.find(h=>h.id===overlapping.heatId);
-    return {ok:false, reason: `${vol.name} is already assigned to ${overlapping.station} for ${oh.division} Heat ${oh.heatNumberInDivision} at ${fmt12(oh.time)}, which overlaps this heat's time window. Nobody can cover two stations at once.`};
+    return {ok:false, reason: `${vol.name} is already assigned to ${overlapping.station} for ${oh.division} Heat ${oh.heatNumberInDivision} at ${fmt12(oh.time)}, which overlaps this heat's time window. Nobody can cover two different stations at once.`};
   }
   return {ok:true};
 }
 function assignStation(ev, heatId, station, volId){
-  const check = canAssignVolunteer(ev, volId, heatId);
+  const check = canAssignVolunteer(ev, volId, heatId, station);
   if(!check.ok){ alert("⚠️ Assignment blocked:\n\n"+check.reason); return false; }
   // ensure volunteer isn't already assigned to a different station in this same heat
   const dupe = ev.stationAssignments.find(a=>a.heatId===heatId && a.volunteerId===volId && a.station!==station);
@@ -655,7 +670,7 @@ function autoAssignStations(ev){
         ptr++; tries++;
         const alreadyThisHeat = ev.stationAssignments.some(a=>a.heatId===heat.id && a.volunteerId===candidate);
         if(alreadyThisHeat) continue;
-        const check = canAssignVolunteer(ev, candidate, heat.id);
+        const check = canAssignVolunteer(ev, candidate, heat.id, station);
         if(check.ok){
           ev.stationAssignments.push({id:uid(), heatId:heat.id, station, volunteerId:candidate});
           placed = true; break;
@@ -695,7 +710,7 @@ function detectIncompleteHeats(ev){
 function detectVolunteerConflicts(ev){
   const conflicts = [];
   ev.stationAssignments.forEach(a=>{
-    const check = canAssignVolunteer(ev, a.volunteerId, a.heatId);
+    const check = canAssignVolunteer(ev, a.volunteerId, a.heatId, a.station);
     if(!check.ok) conflicts.push({assignment:a, reason:check.reason});
   });
   return conflicts;
@@ -756,6 +771,7 @@ function renderAll(){
   renderTabsNav();
   const main = document.getElementById("mainContent");
   if(DB.role==="volunteer"){ main.innerHTML=""; renderMobileVolunteerView(main); return; }
+  if(DB.role==="participant"){ main.innerHTML=""; renderParticipantView(main); return; }
   main.innerHTML = "";
   if(currentTab==="dashboard") renderDashboard(main);
   else if(currentTab==="sponsors") renderSponsors(main);
@@ -1360,7 +1376,13 @@ function heatColHtml(ev, h){
   const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
   const candidates = ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id));
   return `<div class="heat-col" data-heat="${h.id}">
-    <div class="heat-header"><span>${esc(h.division)} · Heat ${h.heatNumberInDivision}</span><span class="heat-time">${fmt12(h.time)}</span><button class="small danger removeHeatBtn" data-heat="${h.id}" title="Remove this heat — later heats shift earlier" style="padding:0 5px;">🗑</button></div>
+    <div class="heat-header">
+      <div class="heat-header-top">
+        <span class="heat-num">Heat ${h.heatNumberInDivision}</span>
+        <button class="small danger removeHeatBtn" data-heat="${h.id}" title="Remove this heat — later heats shift earlier" style="padding:0 5px;">🗑</button>
+      </div>
+      <div class="heat-time">${fmt12(h.time)}</div>
+    </div>
     ${parts.map(p=>`<div class="participant-chip openParticipantChip ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" draggable="true" data-pid="${p.id}" title="Click to open/edit this participant">
       <span>${esc(teamLabel(p))}</span>
       <span style="display:flex;gap:4px;align-items:center;">
@@ -1747,7 +1769,7 @@ function assignVolunteerWholeDay(ev, volId, station){
   pushUndo();
   let assigned = 0, skippedRacing = 0, skippedOther = 0;
   ev.heats.forEach(h=>{
-    const check = canAssignVolunteer(ev, volId, h.id);
+    const check = canAssignVolunteer(ev, volId, h.id, station);
     if(!check.ok){
       if(check.reason && check.reason.toLowerCase().includes("racing")) skippedRacing++;
       else skippedOther++;
@@ -1999,30 +2021,33 @@ function updateLiveTimers(){
 let liveTabFilters = { hideFinished: false };
 function renderLiveTab(main){
   const ev = curEvent();
-  const heats = ev.heats.slice().sort((a,b)=>timeToMin(a.time)-timeToMin(b.time));
   const todayStr = new Date().toISOString().slice(0,10);
+  const heats = ev.heats.slice().sort((a,b)=>{
+    const rank = h => { const started=!!h.actualStartTs; const parts=h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean); const done = started && parts.length>0 && parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id)); return done?2:started?0:1; };
+    return rank(a)-rank(b) || (timeToMin(a.time)-timeToMin(b.time));
+  });
   main.innerHTML = `
     <div class="card">
-      <div class="section-title"><h2>Live</h2>${help("Heats auto-start at their scheduled time as long as someone has this tab open on event day — this is a browser app with no server clock running in the background, so if nobody has the page open, nothing starts automatically. Use 'Start Heat Now' if a heat needs to begin early or didn't trigger, or 'Set start time' to backdate a start you forgot to click. Click 'End Race' next to each racer as they finish to save their time.")}</div>
+      <div class="section-title"><h2>Live</h2>${help("Heats auto-start at their scheduled time as long as someone has this tab open on event day — this is a browser app with no server clock running in the background, so if nobody has the page open, nothing starts automatically. Use 'Start Heat Now' if a heat needs to begin early or didn't trigger, or 'Set start time' to backdate a start you forgot to click. Click 'End Race' next to each racer as they finish to save their time. Racing heats float to the top — this view is built to put on a TV so as many people as possible can see their own timer.")}</div>
       ${ev.date!==todayStr ? `<div class="warn-item orange">🟠 This event's date (${esc(ev.date)}) isn't today. Auto-start is disabled until then — use manual start/override below if you're testing or running early.</div>` : ""}
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-top:8px;"><input type="checkbox" id="liveHideFinished" ${liveTabFilters.hideFinished?'checked':''}> Hide fully finished heats</label>
     </div>
-    ${!heats.length ? `<div class="card" style="color:var(--muted);">No heats generated yet — go to Schedule first.</div>` : heats.map(h=>{
+    ${!heats.length ? `<div class="card" style="color:var(--muted);">No heats generated yet — go to Schedule first.</div>` : `<div class="live-grid">${heats.map(h=>{
       const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
       const started = !!h.actualStartTs;
       const allFinished = started && parts.length>0 && parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id));
       if(liveTabFilters.hideFinished && allFinished) return "";
       const statusBadge = allFinished ? `<span class="badge green">Finished</span>` : started ? `<span class="badge orange">Racing</span>` : `<span class="badge gray">Not started</span>`;
-      return `<div class="card">
+      return `<div class="card live-heat-card ${started&&!allFinished?'live-racing':''}">
         <div class="section-title" style="align-items:center;">
-          <h3 style="margin:0;">${esc(h.division)} · Heat ${h.heatNumberInDivision} <span style="color:var(--muted);font-weight:400;">— scheduled ${fmt12(h.time)}</span></h3>
+          <h3 style="margin:0;">${esc(h.division)} · Heat ${h.heatNumberInDivision} <span style="color:var(--muted);font-weight:400;">— ${fmt12(h.time)}</span></h3>
           ${statusBadge}
         </div>
         ${started ? `
-          <div style="display:flex;align-items:center;gap:14px;margin:8px 0;">
-            <div style="font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;" data-live-timer="${h.actualStartTs}">${fmtElapsed(Date.now()-h.actualStartTs)}</div>
-            <span style="font-size:11px;color:var(--muted);">started ${h.actualStartSource==="auto"?"automatically":h.actualStartSource==="override"?"via manual time override":"manually"} at ${new Date(h.actualStartTs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
-            <button class="small danger" data-reset-start="${h.id}">↺ Reset Start</button>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;margin:10px 0;">
+            <div class="live-timer" data-live-timer="${h.actualStartTs}">${fmtElapsed(Date.now()-h.actualStartTs)}</div>
+            <span style="font-size:11px;color:var(--muted);">started ${h.actualStartSource==="auto"?"automatically":h.actualStartSource==="override"?"via manual override":"manually"} at ${new Date(h.actualStartTs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+            <button class="small danger" data-reset-start="${h.id}" style="margin-top:4px;">↺ Reset Start</button>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;">
             ${parts.map(p=>{
@@ -2045,7 +2070,7 @@ function renderLiveTab(main){
           <div style="font-size:12px;color:var(--muted);">${parts.length} racer${parts.length!==1?'s':''} in this heat.</div>
         `}
       </div>`;
-    }).join("")}
+    }).join("")}</div>`}
   `;
   document.getElementById("liveHideFinished").addEventListener("change", (e)=>{ liveTabFilters.hideFinished = e.target.checked; renderAll(); });
   document.querySelectorAll("[data-start-heat]").forEach(b=> b.addEventListener("click", ()=> startHeatNow(b.dataset.startHeat)));
@@ -2071,7 +2096,9 @@ function renderLiveTab(main){
 }
 setInterval(()=>{
   checkAutoStartHeats();
-  if(typeof currentTab!=="undefined" && currentTab==="live" && DB && DB.role==="admin") updateLiveTimers();
+  if(!DB) return;
+  const onLiveTab = typeof currentTab!=="undefined" && currentTab==="live" && DB.role==="admin";
+  if(onLiveTab || DB.role==="participant") updateLiveTimers();
 }, 1000);
 
 /* =========================================================================
@@ -2258,10 +2285,53 @@ function renderMobileVolunteerView(main){
 }
 
 /* =========================================================================
+   MOBILE PARTICIPANT VIEW — read-only, no editing surface at all
+   ========================================================================= */
+function renderParticipantView(main){
+  const ev = curEvent();
+  const p = ev.participants.find(x=>x.id===DB.currentParticipantId);
+  if(!p){ main.innerHTML = `<div class="card">We couldn't find your registration for this event. <button onclick="logout()">Switch user</button></div>`; return; }
+  const heat = ev.heats.find(h=>h.participantIds.includes(p.id));
+  const now = Date.now();
+  let statusBlock;
+  const result = heat ? (ev.results||[]).find(r=>r.heatId===heat.id && r.participantId===p.id) : null;
+  if(result){
+    // Finished — show their time and rank within their division.
+    const divResults = getResultsWithMeta(ev).filter(r=>r.participant.division===p.division).sort((a,b)=>a.elapsedMs-b.elapsedMs);
+    const rank = divResults.findIndex(r=>r.participantId===p.id) + 1;
+    statusBlock = `<div class="mv-hero" style="background:linear-gradient(135deg,var(--green),#1a7a34);"><h2>🏁 Finished!</h2><div class="sub">Your time</div></div>
+      <div class="mv-block"><div class="icon">⏱</div><div><div class="lbl">Your Time</div><div class="big">${fmtElapsed(result.elapsedMs)}</div></div></div>
+      ${rank ? `<div class="mv-block"><div class="icon">🏆</div><div><div class="lbl">Rank in ${esc(p.division)}</div><div class="big">#${rank} of ${divResults.length}</div></div></div>` : ""}`;
+  } else if(heat && heat.actualStartTs){
+    // Currently racing.
+    statusBlock = `<div class="mv-hero" style="background:linear-gradient(135deg,var(--accent),#a33314);"><h2>🔥 You're racing!</h2><div class="sub">Give it everything</div></div>
+      <div class="mv-block"><div class="icon">⏱</div><div><div class="lbl">Time Elapsed</div><div class="big" data-live-timer="${heat.actualStartTs}">${fmtElapsed(now-heat.actualStartTs)}</div></div></div>`;
+  } else if(heat){
+    const startTs = heatScheduledTs(ev, heat);
+    const diffMin = Math.round((startTs-now)/60000);
+    statusBlock = `<div class="mv-hero"><h2>👋 Hi ${esc(fullName(p))}</h2><div class="sub">${esc(ev.name)}</div></div>
+      <div class="mv-block"><div class="icon">🏁</div><div><div class="lbl">Your Heat</div><div class="big">${esc(p.division)} · Heat ${heat.heatNumberInDivision}</div></div></div>
+      <div class="mv-block"><div class="icon">⏰</div><div><div class="lbl">Scheduled Start</div><div class="big">${fmt12(heat.time)}</div></div></div>
+      ${diffMin>0 ? `<div class="mv-block"><div class="icon">⏳</div><div><div class="lbl">Starts In</div><div class="big">${diffMin<60?diffMin+" min":Math.floor(diffMin/60)+"h "+(diffMin%60)+"m"}</div></div></div>` : ""}
+      <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">Recommended Arrival</div><div class="big">${fmt12(addMinutes(heat.time,-30))}</div></div></div>`;
+  } else {
+    statusBlock = `<div class="mv-hero"><h2>👋 Hi ${esc(fullName(p))}</h2><div class="sub">${esc(ev.name)}</div></div>
+      <div class="mv-block"><div class="icon">🕓</div><div><div class="lbl">Your Heat</div><div class="big">Not scheduled yet — check back soon</div></div></div>`;
+  }
+  main.innerHTML = `
+    <div id="mobileView">
+      ${statusBlock}
+      ${p.division.indexOf("Doubles")!==-1 || p.division==="Relay" ? `<div class="mv-block"><div class="icon">👥</div><div><div class="lbl">Team</div><div class="big">${esc(teamLabel(p))}</div></div></div>` : ""}
+      <button style="width:100%;margin-top:16px;padding:16px;" onclick="logout()">Switch User</button>
+    </div>
+  `;
+}
+
+/* =========================================================================
    LOGIN / LOGOUT
    ========================================================================= */
 function logout(){
-  DB.role=null; DB.currentVolunteerId=null; saveDB();
+  DB.role=null; DB.currentVolunteerId=null; DB.currentParticipantId=null; saveDB();
   if(CLOUD_ENABLED && firebase.auth().currentUser){ firebase.auth().signOut(); }
   showLogin();
 }
@@ -2270,11 +2340,14 @@ function showLogin(){
   document.getElementById("loginScreen").style.display = "flex";
   document.getElementById("adminPasswordPrompt").classList.add("hidden");
   document.getElementById("volunteerPicker").classList.add("hidden");
+  document.getElementById("participantPicker").classList.add("hidden");
   document.getElementById("adminPasswordError").style.display = "none";
   document.getElementById("adminEmailInput").value = "";
   document.getElementById("adminPasswordInput").value = "";
   const vs = document.getElementById("volunteerSelect");
   vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
+  const ps = document.getElementById("participantSelect");
+  ps.innerHTML = curEvent().participants.map(p=>`<option value="${p.id}">${esc(teamLabel(p))} (${esc(p.division)})</option>`).join("");
 }
 function enterApp(){
   document.getElementById("loginScreen").style.display = "none";
@@ -2308,6 +2381,7 @@ function tryAdminLogin(){
 }
 document.getElementById("btnAdminLogin").addEventListener("click", ()=>{
   document.getElementById("volunteerPicker").classList.add("hidden");
+  document.getElementById("participantPicker").classList.add("hidden");
   document.getElementById("adminPasswordPrompt").classList.remove("hidden");
   document.getElementById("adminPasswordError").style.display = "none";
   document.getElementById("adminPasswordInput").focus();
@@ -2317,10 +2391,19 @@ document.getElementById("adminPasswordInput").addEventListener("keydown", (e)=>{
 document.getElementById("adminEmailInput").addEventListener("keydown", (e)=>{ if(e.key==="Enter") document.getElementById("adminPasswordInput").focus(); });
 document.getElementById("btnVolunteerLogin").addEventListener("click", ()=>{
   document.getElementById("adminPasswordPrompt").classList.add("hidden");
+  document.getElementById("participantPicker").classList.add("hidden");
   document.getElementById("volunteerPicker").classList.remove("hidden");
 });
 document.getElementById("btnVolunteerContinue").addEventListener("click", ()=>{
   DB.role="volunteer"; DB.currentVolunteerId = document.getElementById("volunteerSelect").value; saveDB(true); enterApp();
+});
+document.getElementById("btnParticipantLogin").addEventListener("click", ()=>{
+  document.getElementById("adminPasswordPrompt").classList.add("hidden");
+  document.getElementById("volunteerPicker").classList.add("hidden");
+  document.getElementById("participantPicker").classList.remove("hidden");
+});
+document.getElementById("btnParticipantContinue").addEventListener("click", ()=>{
+  DB.role="participant"; DB.currentParticipantId = document.getElementById("participantSelect").value; saveDB(true); enterApp();
 });
 document.getElementById("btnSwitchUser").addEventListener("click", logout);
 document.getElementById("btnNewEvent").addEventListener("click", ()=>{
