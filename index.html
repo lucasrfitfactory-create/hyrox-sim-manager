@@ -36,6 +36,8 @@ h1,h2,h3,h4{margin:0 0 8px 0;font-weight:700;}
 .login-card p{color:var(--muted);margin-bottom:24px;}
 .role-btns{display:flex;gap:12px;margin-bottom:18px;}
 .role-btns button{flex:1;padding:16px;font-size:15px;border-radius:12px;}
+.participant-pick-btn{display:block;width:100%;text-align:left;padding:12px 14px;margin-bottom:6px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;font-size:14px;}
+.participant-pick-btn:hover{border-color:var(--accent2);}
 #volunteerPicker{margin-top:12px;text-align:left;}
 #volunteerPicker select{width:100%;margin-top:8px;}
 
@@ -199,9 +201,10 @@ tr:hover td{background:var(--bg3);}
       <button class="primary" style="width:100%;margin-top:10px;" id="btnVolunteerContinue">Continue</button>
     </div>
     <div id="participantPicker" class="hidden">
-      <label style="font-size:12px;color:var(--muted);font-weight:600;">Select your name</label>
-      <select id="participantSelect"></select>
-      <button class="primary" style="width:100%;margin-top:10px;" id="btnParticipantContinue">Continue</button>
+      <label style="font-size:12px;color:var(--muted);font-weight:600;">Find your name</label>
+      <input type="text" id="participantSearchInput" placeholder="Start typing your name…" style="width:100%;margin-top:6px;font-size:16px;padding:12px;box-sizing:border-box;" autocomplete="off">
+      <select id="participantDivisionFilter" style="width:100%;margin-top:8px;"><option value="">All Divisions</option></select>
+      <div id="participantResultsList" style="margin-top:10px;max-height:280px;overflow-y:auto;text-align:left;"></div>
     </div>
   </div>
 </div>
@@ -800,14 +803,21 @@ function renderTabsNav(){
 
 function renderAll(){
   const staffOnly = DB.role==="admin" && DB.adminTier==="staff";
-  document.getElementById("roleBadge").textContent = DB.role==="admin" ? (staffOnly?"STAFF":"ADMIN") : "VOLUNTEER";
+  const isMobileRole = DB.role==="volunteer" || DB.role==="participant";
+  const roleLabels = {admin: staffOnly?"STAFF":"ADMIN", volunteer:"VOLUNTEER", participant:"ATHLETE"};
+  document.getElementById("roleBadge").textContent = roleLabels[DB.role] || "";
   document.getElementById("roleBadge").className = "role-badge" + (DB.role==="admin"?"":" volunteer");
   if(staffOnly){
     const allowedIds = TABS.filter(t=>t.staffOk).map(t=>t.id);
     if(!allowedIds.includes(currentTab)) currentTab = "dashboard";
   }
-  renderEventSelect();
-  renderTabsNav();
+  // Volunteers and athletes get their own dedicated single-purpose view — the
+  // multi-tab admin chrome (event switcher, global search, tab bar) doesn't
+  // apply to them and was leaking through before.
+  document.querySelector(".topbar .event-switcher").style.display = isMobileRole ? "none" : "";
+  document.getElementById("globalSearch").style.display = isMobileRole ? "none" : "";
+  document.getElementById("tabsNav").style.display = isMobileRole ? "none" : "";
+  if(!isMobileRole){ renderEventSelect(); renderTabsNav(); }
   document.getElementById("btnNewEvent").style.display = isFullAdmin() ? "" : "none";
   document.getElementById("eventSelect").disabled = !isFullAdmin();
   const main = document.getElementById("mainContent");
@@ -2564,14 +2574,38 @@ function showLogin(){
   ["btnAdminLogin","btnVolunteerLogin","btnParticipantLogin"].forEach(bid=> document.getElementById(bid).classList.remove("primary"));
   const vs = document.getElementById("volunteerSelect");
   vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
-  const ps = document.getElementById("participantSelect");
-  ps.innerHTML = curEvent().participants.map(p=>`<option value="${p.id}">${esc(teamLabel(p))} (${esc(p.division)})</option>`).join("");
+  const divFilter = document.getElementById("participantDivisionFilter");
+  divFilter.innerHTML = `<option value="">All Divisions</option>` + DIVISIONS.map(d=>`<option>${esc(d)}</option>`).join("");
+  document.getElementById("participantSearchInput").value = "";
+  renderParticipantResults();
   if(DIRECT_ATHLETE_MODE){
     document.getElementById("roleBtns").style.display = "none";
     document.getElementById("loginTitle").textContent = "🏁 " + curEvent().name;
-    document.getElementById("loginSubtitle").textContent = "Find your heat time — select your name below";
+    document.getElementById("loginSubtitle").textContent = "Find your heat time";
     document.getElementById("participantPicker").classList.remove("hidden");
   }
+}
+function renderParticipantResults(){
+  const ev = curEvent();
+  const q = (document.getElementById("participantSearchInput").value||"").trim().toLowerCase();
+  const div = document.getElementById("participantDivisionFilter").value;
+  let list = ev.participants.slice();
+  if(div) list = list.filter(p=>p.division===div);
+  if(q) list = list.filter(p=> fullName(p).toLowerCase().includes(q) || (p.partnerNames||"").toLowerCase().includes(q));
+  list.sort((a,b)=> fullName(a).localeCompare(fullName(b)));
+  const container = document.getElementById("participantResultsList");
+  if(!list.length){
+    container.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:10px;text-align:center;">No matches — check the spelling or try clearing the division filter.</div>`;
+    return;
+  }
+  const capped = list.slice(0, 60);
+  container.innerHTML = capped.map(p=>`<button type="button" class="participant-pick-btn" data-pid="${p.id}">${esc(teamLabel(p))} <span style="color:var(--muted);font-size:12px;">— ${esc(p.division)}</span></button>`).join("")
+    + (list.length>capped.length ? `<div style="color:var(--muted);font-size:12px;text-align:center;padding:6px;">+${list.length-capped.length} more — keep typing to narrow it down</div>` : "");
+  container.querySelectorAll("[data-pid]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      DB.role="participant"; DB.currentParticipantId = btn.dataset.pid; saveDB(true); enterApp();
+    });
+  });
 }
 function enterApp(){
   document.getElementById("loginScreen").style.display = "none";
@@ -2633,10 +2667,10 @@ document.getElementById("btnParticipantLogin").addEventListener("click", ()=>{
   document.getElementById("adminPasswordPrompt").classList.add("hidden");
   document.getElementById("volunteerPicker").classList.add("hidden");
   document.getElementById("participantPicker").classList.remove("hidden");
+  document.getElementById("participantSearchInput").focus();
 });
-document.getElementById("btnParticipantContinue").addEventListener("click", ()=>{
-  DB.role="participant"; DB.currentParticipantId = document.getElementById("participantSelect").value; saveDB(true); enterApp();
-});
+document.getElementById("participantSearchInput").addEventListener("input", renderParticipantResults);
+document.getElementById("participantDivisionFilter").addEventListener("change", renderParticipantResults);
 document.getElementById("btnSwitchUser").addEventListener("click", logout);
 document.getElementById("btnNewEvent").addEventListener("click", ()=>{
   const name = prompt("New event name:", "HYROX Simulation — "); if(!name) return;
