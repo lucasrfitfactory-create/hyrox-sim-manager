@@ -256,7 +256,23 @@ const STORE_KEY = "hyroxSimApp_v1";
 
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
-   console under Authentication > Users. */
+   console under Authentication > Users.
+
+   STAFF_EMAILS: accounts listed here get a restricted "staff" tier instead of
+   full admin — Dashboard, Check-In, and Live only. This is a UI convenience,
+   NOT a real security boundary: the Firestore write rule (allow write: if
+   request.auth != null) doesn't distinguish which authenticated user is
+   writing, so a staff account that opened browser dev tools could still call
+   Firestore directly and bypass these UI restrictions. Real enforcement would
+   require Firebase custom claims set by a Cloud Function (a small backend
+   piece this static-hosted app doesn't have). Good enough to stop someone
+   from accidentally wandering into Sponsors or deleting an event; not
+   something to rely on if a staff account might act in bad faith. */
+const STAFF_EMAILS = ["getfit@fitfactoryfitness.com"];
+function computeAdminTier(email){
+  return (email && STAFF_EMAILS.includes(email.toLowerCase())) ? "staff" : "full";
+}
+function isFullAdmin(){ return DB.role==="admin" && DB.adminTier!=="staff"; }
 
 /* =========================================================================
    CLOUD SYNC (Firebase Firestore)
@@ -745,37 +761,49 @@ document.getElementById("modalBackdrop").addEventListener("click", e=>{ if(e.tar
    RENDER: ROOT
    ========================================================================= */
 const TABS = [
-  {id:"dashboard", label:"Dashboard", adminOnly:false},
-  {id:"sponsors", label:"Sponsors", adminOnly:true},
-  {id:"participants", label:"Participants", adminOnly:true},
-  {id:"heatgen", label:"Schedule", adminOnly:true},
-  {id:"volunteers", label:"Volunteers", adminOnly:true},
-  {id:"stations", label:"Stations", adminOnly:true},
-  {id:"live", label:"Live", adminOnly:true},
-  {id:"results", label:"Results", adminOnly:true},
-  {id:"schedule", label:"Full Schedule", adminOnly:false},
-  {id:"settings", label:"Settings", adminOnly:true}
+  {id:"dashboard", label:"Dashboard", adminOnly:false, staffOk:true},
+  {id:"checkin", label:"Check-In", adminOnly:true, staffOk:true},
+  {id:"live", label:"Live", adminOnly:true, staffOk:true},
+  {id:"sponsors", label:"Sponsors", adminOnly:true, staffOk:false},
+  {id:"participants", label:"Participants", adminOnly:true, staffOk:false},
+  {id:"heatgen", label:"Schedule", adminOnly:true, staffOk:false},
+  {id:"volunteers", label:"Volunteers", adminOnly:true, staffOk:false},
+  {id:"stations", label:"Stations", adminOnly:true, staffOk:false},
+  {id:"results", label:"Results", adminOnly:true, staffOk:false},
+  {id:"schedule", label:"Full Schedule", adminOnly:false, staffOk:false},
+  {id:"settings", label:"Settings", adminOnly:true, staffOk:false}
 ];
 
 function renderTabsNav(){
   const nav = document.getElementById("tabsNav");
-  const visible = TABS.filter(t=> DB.role==="admin" || !t.adminOnly);
+  const staffOnly = DB.role==="admin" && DB.adminTier==="staff";
+  const visible = TABS.filter(t=>{
+    if(DB.role!=="admin") return !t.adminOnly;
+    if(staffOnly) return !!t.staffOk;
+    return true;
+  });
   nav.innerHTML = visible.map(t=>`<button data-tab="${t.id}" class="${currentTab===t.id?'active':''}">${t.label}</button>`).join("");
   nav.querySelectorAll("button").forEach(b=> b.addEventListener("click", ()=>{ currentTab=b.dataset.tab; renderAll(); }));
 }
 
 function renderAll(){
-  document.getElementById("roleBadge").textContent = DB.role==="admin" ? "ADMIN" : "VOLUNTEER";
+  const staffOnly = DB.role==="admin" && DB.adminTier==="staff";
+  document.getElementById("roleBadge").textContent = DB.role==="admin" ? (staffOnly?"STAFF":"ADMIN") : "VOLUNTEER";
   document.getElementById("roleBadge").className = "role-badge" + (DB.role==="admin"?"":" volunteer");
+  if(staffOnly){
+    const allowedIds = TABS.filter(t=>t.staffOk).map(t=>t.id);
+    if(!allowedIds.includes(currentTab)) currentTab = "dashboard";
+  }
   renderEventSelect();
   renderTabsNav();
-  document.getElementById("btnNewEvent").style.display = DB.role==="admin" ? "" : "none";
-  document.getElementById("eventSelect").disabled = DB.role!=="admin";
+  document.getElementById("btnNewEvent").style.display = isFullAdmin() ? "" : "none";
+  document.getElementById("eventSelect").disabled = !isFullAdmin();
   const main = document.getElementById("mainContent");
   if(DB.role==="volunteer"){ main.innerHTML=""; renderMobileVolunteerView(main); return; }
   if(DB.role==="participant"){ main.innerHTML=""; renderParticipantView(main); return; }
   main.innerHTML = "";
   if(currentTab==="dashboard") renderDashboard(main);
+  else if(currentTab==="checkin") renderCheckInTab(main);
   else if(currentTab==="sponsors") renderSponsors(main);
   else if(currentTab==="participants") renderParticipants(main);
   else if(currentTab==="heatgen") renderHeatGen(main);
@@ -840,6 +868,7 @@ function renderDashboard(main){
         <div class="label">Total Participants ${help("Actual athlete headcount, not registration rows — a Doubles/Mixed Doubles entry counts as 2 people. Relay counts 1 + however many names are in that entry's Partner Names field (comma-separated), so fill that in for an accurate count. Goal line is 100 participants.")}</div>
         <div style="background:var(--bg3);border-radius:6px;height:6px;margin-top:6px;overflow:hidden;"><div style="background:${goalPct>=100?'var(--green)':'var(--accent)'};height:100%;width:${goalPct}%;"></div></div>
       </div>
+      <div class="stat"><div class="num">${ev.participants.filter(p=>p.checkedIn).length} <span style="font-size:13px;color:var(--muted);font-weight:400;">/ ${ev.participants.length}</span></div><div class="label">Checked In</div></div>
       <div class="stat"><div class="num">${ev.heats.length}</div><div class="label">Heats Scheduled</div></div>
       <div class="stat"><div class="num">${ev.sponsors.length}</div><div class="label">Sponsors (${sponsorConfirmed} confirmed)</div></div>
       <div class="stat"><div class="num">${ev.volunteers.length}</div><div class="label">Volunteers</div></div>
@@ -1386,7 +1415,7 @@ function heatColHtml(ev, h){
       <div class="heat-time">${fmt12(h.time)}</div>
     </div>
     ${parts.map(p=>`<div class="participant-chip openParticipantChip ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" draggable="true" data-pid="${p.id}" title="Click to open/edit this participant">
-      <span>${esc(teamLabel(p))}</span>
+      <span>${p.checkedIn?'✅ ':''}${esc(teamLabel(p))}</span>
       <span style="display:flex;gap:4px;align-items:center;">
         ${(p.constraints||[]).some(c=>c.type==='vip')?'<span class="tag">VIP</span>':''}
         <button class="small danger removeFromHeatBtn" data-heat="${h.id}" data-pid="${p.id}" style="padding:0 5px;" title="Remove from this heat">✕</button>
@@ -1854,7 +1883,8 @@ function renderSettingsTab(main){
     <div class="card">
       <div class="section-title"><h3>Signed in as</h3></div>
       ${currentUser ? `
-        <div style="font-size:14px;margin-bottom:10px;">📧 <b>${esc(currentUser.email)}</b></div>
+        <div style="font-size:14px;margin-bottom:6px;">📧 <b>${esc(currentUser.email)}</b> <span class="badge ${isFullAdmin()?'green':'orange'}">${isFullAdmin()?'Full Admin':'Staff (restricted)'}</span></div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${isFullAdmin() ? "Full access to every tab and setting." : "Restricted tier — Dashboard, Check-In, and Live only. Sponsors, Participants, Schedule editing, Volunteers/Stations, Results, and Settings are hidden."}</div>
         <div class="toolbar">
           <button class="small danger" id="btnSettingsSignOut">Sign Out</button>
         </div>
@@ -1865,6 +1895,8 @@ function renderSettingsTab(main){
       <div class="section-title"><h3>Other admin accounts</h3></div>
       <div style="font-size:13px;color:var(--muted);line-height:1.6;">
         This app can't list, add, or delete other admin logins from here — Firebase Authentication only lets a signed-in user manage their own session from client-side code like this. Adding a teammate as admin, or removing someone's access, has to be done directly in the Firebase console.
+        <br><br>
+        Which accounts get the restricted "Staff" tier (Dashboard, Check-In, Live only) instead of full access is controlled by the <code>STAFF_EMAILS</code> list near the top of the app's code — currently just <code>getfit@fitfactoryfitness.com</code>. Adding another restricted account means editing that list and re-uploading the file. This restriction is UI-level only: it hides tabs and buttons, but the underlying Firestore write permission doesn't yet distinguish between accounts, so treat it as a guardrail against mistakes, not a hard security wall against a staff account acting in bad faith.
       </div>
       ${consoleUrl ? `<div class="toolbar" style="margin-top:10px;"><a href="${consoleUrl}" target="_blank" rel="noopener"><button class="small">Open Firebase Authentication Console ↗</button></a></div>` : ""}
     </div>
@@ -2197,6 +2229,67 @@ function renderLeaderboard(ev, divisionFilter){
 }
 
 /* =========================================================================
+   CHECK-IN TAB — front desk marks arrivals on event day
+   ========================================================================= */
+function checkInParticipant(pid){
+  const ev = curEvent();
+  const p = ev.participants.find(x=>x.id===pid); if(!p) return;
+  p.checkedIn = true; p.checkedInAt = Date.now();
+  saveDB(); renderAll();
+}
+function undoCheckIn(pid){
+  const ev = curEvent();
+  const p = ev.participants.find(x=>x.id===pid); if(!p) return;
+  p.checkedIn = false; p.checkedInAt = null;
+  saveDB(); renderAll();
+}
+let checkInSearch = "";
+function renderCheckInTab(main){
+  const ev = curEvent();
+  const q = checkInSearch.trim().toLowerCase();
+  const heatOf = pid => ev.heats.find(h=>h.participantIds.includes(pid));
+  let list = ev.participants.slice();
+  if(q){
+    list = list.filter(p=>
+      fullName(p).toLowerCase().includes(q) ||
+      (p.email||"").toLowerCase().includes(q) ||
+      (p.teamName||"").toLowerCase().includes(q) ||
+      (p.partnerNames||"").toLowerCase().includes(q)
+    );
+  }
+  list.sort((a,b)=> fullName(a).localeCompare(fullName(b)));
+  const totalCheckedIn = ev.participants.filter(p=>p.checkedIn).length;
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title"><h2>Check-In</h2>${help("Search a name and click Check In when they arrive. Doubles/relay teams check in together as one entry — no need to check in each teammate separately.")}</div>
+      <div style="font-size:14px;margin-bottom:10px;">✅ <b>${totalCheckedIn}</b> / ${ev.participants.length} checked in</div>
+      <input id="checkinSearch" placeholder="Search by name or email…" value="${esc(checkInSearch)}" style="font-size:16px;padding:12px;" autocomplete="off">
+    </div>
+    <div class="card table-wrap">
+      <table>
+        <tr><th>Name</th><th>Division</th><th>Heat</th><th>Status</th><th></th></tr>
+        ${!list.length ? `<tr><td colspan="5" style="color:var(--muted);">No matches.</td></tr>` : list.map(p=>{
+          const h = heatOf(p.id);
+          return `<tr>
+            <td>${esc(teamLabel(p))}</td>
+            <td>${esc(p.division)}</td>
+            <td>${h?fmt12(h.time)+" · Heat "+h.heatNumberInDivision:"—"}</td>
+            <td>${p.checkedIn ? `<span class="badge green">✓ Checked in ${new Date(p.checkedInAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>` : `<span class="badge gray">Not here yet</span>`}</td>
+            <td>${p.checkedIn ? `<button class="small" data-undo-checkin="${p.id}">Undo</button>` : `<button class="primary small" data-checkin="${p.id}">✓ Check In</button>`}</td>
+          </tr>`;
+        }).join("")}
+      </table>
+    </div>
+  `;
+  const searchEl = document.getElementById("checkinSearch");
+  searchEl.addEventListener("input", (e)=>{ checkInSearch = e.target.value; renderAll(); });
+  searchEl.focus();
+  searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length);
+  document.querySelectorAll("[data-checkin]").forEach(b=> b.addEventListener("click", ()=> checkInParticipant(b.dataset.checkin)));
+  document.querySelectorAll("[data-undo-checkin]").forEach(b=> b.addEventListener("click", ()=> undoCheckIn(b.dataset.undoCheckin)));
+}
+
+/* =========================================================================
    EVENT SCHEDULE (full synchronized view)
    ========================================================================= */
 let scheduleFilters = {division:"", volunteer:"", station:"", search:""};
@@ -2375,7 +2468,7 @@ function tryAdminLogin(){
   document.getElementById("adminPasswordError").style.display = "none";
   btn.disabled = true; btn.textContent = "Signing in…";
   firebase.auth().signInWithEmailAndPassword(email, pass)
-    .then(()=>{ DB.role="admin"; saveDB(true); enterApp(); })
+    .then(()=>{ DB.role="admin"; DB.adminTier = computeAdminTier(email); saveDB(true); enterApp(); })
     .catch((err)=>{ console.error("Admin sign-in failed", err); showError(); })
     .finally(()=>{ btn.disabled = false; btn.textContent = "Continue"; });
 }
@@ -2442,7 +2535,7 @@ if(DB.role==="admin" && CLOUD_ENABLED){
   // enforcement is the Firestore security rule requiring request.auth.
   showLogin();
   firebase.auth().onAuthStateChanged(user=>{
-    if(user){ enterApp(); } else { DB.role=null; saveDB(); showLogin(); }
+    if(user){ DB.adminTier = computeAdminTier(user.email); enterApp(); } else { DB.role=null; saveDB(); showLogin(); }
   });
 } else if(DB.role){
   enterApp();
