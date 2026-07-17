@@ -32,8 +32,12 @@ h1,h2,h3,h4{margin:0 0 8px 0;font-weight:700;}
 /* ===== Login / Role Screen ===== */
 #loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
 .login-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:36px;max-width:440px;width:100%;box-shadow:var(--shadow);text-align:center;}
-.login-card h1{font-size:24px;margin-bottom:4px;}
+.login-card h1{font-size:22px;margin-bottom:4px;line-height:1.25;}
 .login-card p{color:var(--muted);margin-bottom:24px;}
+.login-card.athlete-mode{max-width:480px;}
+.login-logo{margin-bottom:12px;}
+.login-logo img{max-width:220px;max-height:70px;width:auto;height:auto;}
+.login-event-badge{display:inline-block;background:var(--bg3);border:1px solid var(--border);color:var(--accent2);font-weight:700;font-size:14px;padding:5px 14px;border-radius:20px;margin:8px 0 2px;}
 .role-btns{display:flex;gap:12px;margin-bottom:18px;}
 .role-btns button{flex:1;padding:16px;font-size:15px;border-radius:12px;}
 .participant-pick-btn{display:block;width:100%;text-align:left;padding:12px 14px;margin-bottom:6px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;font-size:14px;}
@@ -179,8 +183,10 @@ tr:hover td{background:var(--bg3);}
 
 <!-- ================= LOGIN SCREEN ================= -->
 <div id="loginScreen">
-  <div class="login-card">
+  <div class="login-card" id="loginCard">
+    <div id="loginLogo" class="login-logo hidden"></div>
     <h1 id="loginTitle">🏋️ HYROX Simulation Manager</h1>
+    <div id="loginEventBadge" class="login-event-badge hidden"></div>
     <p id="loginSubtitle">Fit Factory — recurring event operations hub</p>
     <div class="role-btns" id="roleBtns">
       <button class="primary" id="btnAdminLogin">Admin</button>
@@ -2580,7 +2586,14 @@ function showLogin(){
   renderParticipantResults();
   if(DIRECT_ATHLETE_MODE){
     document.getElementById("roleBtns").style.display = "none";
-    document.getElementById("loginTitle").textContent = "🏁 " + curEvent().name;
+    document.getElementById("loginCard").classList.add("athlete-mode");
+    // Event names are typically "HYROX Simulation — August 9" — split so the
+    // date gets its own compact badge instead of wrapping awkwardly in the h1.
+    const nameParts = curEvent().name.split("—").map(s=>s.trim());
+    document.getElementById("loginTitle").textContent = "🏁 " + (nameParts[0] || curEvent().name);
+    const badge = document.getElementById("loginEventBadge");
+    if(nameParts[1]){ badge.textContent = nameParts[1]; badge.classList.remove("hidden"); }
+    else { badge.classList.add("hidden"); }
     document.getElementById("loginSubtitle").textContent = "Find your heat time";
     document.getElementById("participantPicker").classList.remove("hidden");
   }
