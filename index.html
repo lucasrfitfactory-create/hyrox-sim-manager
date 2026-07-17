@@ -136,6 +136,13 @@ tr:hover td{background:var(--bg3);}
 .live-heat-card{margin:0;}
 .live-heat-card.live-racing{border-color:var(--accent2);box-shadow:0 0 0 1px var(--accent2);}
 .live-timer{font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:1px;}
+.checkin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
+.checkin-card{margin:0;padding:14px;}
+.checkin-card.checkin-done{border-color:var(--green);}
+.checkin-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.checkin-name{font-weight:700;font-size:16px;}
+.checkin-meta{color:var(--muted);font-size:12px;margin-top:2px;}
+.checkin-btn{padding:10px 16px;font-size:14px;white-space:nowrap;}
 
 .timeline{position:relative;height:60px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);margin-top:8px;overflow:hidden;}
 .timeline .block{position:absolute;top:6px;bottom:6px;border-radius:5px;font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 4px;white-space:nowrap;}
@@ -2180,6 +2187,7 @@ function renderResultsTab(main){
     })));
     download(`${ev.name.replace(/[^a-z0-9]+/gi,"_")}_results.csv`, csv);
   });
+  wireResultEditButtons();
 }
 function sortResultRows(rows){
   if(resultsFilters.sort==="time") rows.sort((a,b)=>a.elapsedMs-b.elapsedMs);
@@ -2187,18 +2195,64 @@ function sortResultRows(rows){
   else rows.sort((a,b)=> (a.heat?timeToMin(a.heat.time):0) - (b.heat?timeToMin(b.heat.time):0) || a.elapsedMs-b.elapsedMs);
   return rows;
 }
+function parseElapsedStr(str){
+  if(!str) return null;
+  const parts = str.trim().split(":").map(s=>Number(s));
+  if(!parts.length || parts.some(n=>isNaN(n)||n<0)) return null;
+  let h=0,m=0,s=0;
+  if(parts.length===3){ [h,m,s]=parts; }
+  else if(parts.length===2){ [m,s]=parts; }
+  else if(parts.length===1){ [s]=parts; }
+  else return null;
+  return ((h*3600)+(m*60)+s)*1000;
+}
+function openEditResultModal(heatId, participantId){
+  const ev = curEvent();
+  const r = (ev.results||[]).find(x=>x.heatId===heatId && x.participantId===participantId);
+  if(!r) return;
+  const p = ev.participants.find(x=>x.id===participantId);
+  openModal(`
+    <h2>Edit Time — ${esc(teamLabel(p))}</h2>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Use this if the timer misfired or was stopped for the wrong person. Format: mm:ss or h:mm:ss.</div>
+    <div class="form-row"><label>Time</label><input id="edit_time_input" value="${fmtElapsed(r.elapsedMs)}" style="font-size:22px;text-align:center;padding:10px;"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveEditedResultTime('${heatId}','${participantId}')">Save</button>
+    </div>
+  `);
+  setTimeout(()=>{ const el=document.getElementById("edit_time_input"); if(el){ el.focus(); el.select(); } }, 0);
+}
+function saveEditedResultTime(heatId, participantId){
+  const val = document.getElementById("edit_time_input").value;
+  const ms = parseElapsedStr(val);
+  if(ms==null){ alert("Enter a valid time like 12:34 or 1:02:03."); return; }
+  const ev = curEvent();
+  const r = (ev.results||[]).find(x=>x.heatId===heatId && x.participantId===participantId);
+  if(!r) return;
+  r.elapsedMs = ms; r.savedAt = Date.now(); r.manuallyEdited = true;
+  saveDB(); closeModal(); renderAll();
+}
+function wireResultEditButtons(){
+  document.querySelectorAll("[data-edit-result]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const [heatId, pid] = b.dataset.editResult.split("|");
+      openEditResultModal(heatId, pid);
+    });
+  });
+}
 function renderResultsTable(rows){
   const sorted = sortResultRows(rows.slice());
   if(!sorted.length) return `<div class="card" style="color:var(--muted);">No results recorded yet — save finish times from the Live tab.</div>`;
   return `<div class="card table-wrap">
     <table>
-      <tr><th>Division</th><th>Participant</th><th>Heat</th><th>Heat Time</th><th>Result</th></tr>
+      <tr><th>Division</th><th>Participant</th><th>Heat</th><th>Heat Time</th><th>Result</th><th></th></tr>
       ${sorted.map(r=>`<tr>
         <td>${esc(r.participant.division)}</td>
         <td>${esc(teamLabel(r.participant))}</td>
         <td>${r.heat?esc(r.heat.division+" · "+r.heat.heatNumberInDivision):"—"}</td>
         <td>${r.heat?fmt12(r.heat.time):"—"}</td>
-        <td style="font-variant-numeric:tabular-nums;font-weight:700;">${fmtElapsed(r.elapsedMs)}</td>
+        <td style="font-variant-numeric:tabular-nums;font-weight:700;">${fmtElapsed(r.elapsedMs)}${r.manuallyEdited?' <span class="badge orange" style="font-size:10px;">edited</span>':''}</td>
+        <td>${r.heat?`<button class="small" data-edit-result="${r.heat.id}|${r.participantId}">Edit</button>`:""}</td>
       </tr>`).join("")}
     </table>
   </div>`;
@@ -2213,11 +2267,12 @@ function renderLeaderboard(ev, divisionFilter){
     return `<div class="card">
       <div class="section-title"><h3>${esc(div)}</h3></div>
       <table>
-        <tr><th>#</th><th>Participant</th><th>Time</th></tr>
+        <tr><th>#</th><th>Participant</th><th>Time</th><th></th></tr>
         ${list.map((r,i)=>`<tr>
           <td>${medals[i]||(i+1)}</td>
           <td>${esc(teamLabel(r.participant))}</td>
-          <td style="font-variant-numeric:tabular-nums;font-weight:700;">${fmtElapsed(r.elapsedMs)}</td>
+          <td style="font-variant-numeric:tabular-nums;font-weight:700;">${fmtElapsed(r.elapsedMs)}${r.manuallyEdited?' <span class="badge orange" style="font-size:10px;">edited</span>':''}</td>
+          <td>${r.heat?`<button class="small" data-edit-result="${r.heat.id}|${r.participantId}">Edit</button>`:""}</td>
         </tr>`).join("")}
       </table>
     </div>`;
@@ -2236,6 +2291,7 @@ function checkInParticipant(pid){
 function undoCheckIn(pid){
   const ev = curEvent();
   const p = ev.participants.find(x=>x.id===pid); if(!p) return;
+  if(!confirm(`Undo check-in for ${teamLabel(p)}? Only do this if they were checked in by mistake.`)) return;
   p.checkedIn = false; p.checkedInAt = null;
   saveDB(); renderAll();
 }
@@ -2250,6 +2306,7 @@ function updateParticipantTeamInfo(pid, partnerNames){
 }
 let checkInSearch = "";
 let checkInEditingId = null;
+let checkInFilters = { status:"all", division:"", sort:"heat" };
 function renderCheckInTab(main){
   const ev = curEvent();
   const q = checkInSearch.trim().toLowerCase();
@@ -2262,41 +2319,80 @@ function renderCheckInTab(main){
       (p.partnerNames||"").toLowerCase().includes(q)
     );
   }
-  list.sort((a,b)=> fullName(a).localeCompare(fullName(b)));
+  if(checkInFilters.division) list = list.filter(p=>p.division===checkInFilters.division);
+  if(checkInFilters.status==="in") list = list.filter(p=>p.checkedIn);
+  if(checkInFilters.status==="pending") list = list.filter(p=>!p.checkedIn);
+
+  const divRank = d => DIVISIONS.indexOf(d);
+  const heatMin = p => { const h=heatOf(p.id); return h ? timeToMin(h.time) : 999999; };
+  if(checkInFilters.sort==="heat"){
+    list.sort((a,b)=> heatMin(a)-heatMin(b) || divRank(a.division)-divRank(b.division) || fullName(a).localeCompare(fullName(b)));
+  } else if(checkInFilters.sort==="division"){
+    list.sort((a,b)=> divRank(a.division)-divRank(b.division) || heatMin(a)-heatMin(b) || fullName(a).localeCompare(fullName(b)));
+  } else if(checkInFilters.sort==="arrival"){
+    list.sort((a,b)=> (b.checkedInAt||0)-(a.checkedInAt||0) || fullName(a).localeCompare(fullName(b)));
+  } else {
+    list.sort((a,b)=> fullName(a).localeCompare(fullName(b)));
+  }
+
   const totalCheckedIn = ev.participants.filter(p=>p.checkedIn).length;
+  const pct = ev.participants.length ? Math.round((totalCheckedIn/ev.participants.length)*100) : 0;
   main.innerHTML = `
     <div class="card">
-      <div class="section-title"><h2>Check-In</h2>${help("Search a name and click Check In when they arrive. Doubles/relay teams check in together as one entry — no need to check in each teammate separately.")}</div>
-      <div style="font-size:14px;margin-bottom:10px;">✅ <b>${totalCheckedIn}</b> / ${ev.participants.length} checked in</div>
-      <input id="checkinSearch" placeholder="Search by name or email…" value="${esc(checkInSearch)}" style="font-size:16px;padding:12px;" autocomplete="off">
+      <div class="section-title"><h2>Check-In</h2>${help("Search a name, tap Check In when they arrive. Doubles/relay teams check in together as one entry. Sort by Heat Time to see who's racing soon, or Arrival to review who just checked in.")}</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <div style="font-size:15px;">✅ <b>${totalCheckedIn}</b> / ${ev.participants.length} checked in</div>
+        <div style="flex:1;background:var(--bg3);border-radius:6px;height:8px;overflow:hidden;max-width:240px;"><div style="background:var(--green);height:100%;width:${pct}%;"></div></div>
+      </div>
+      <input id="checkinSearch" placeholder="🔍 Search by name or email…" value="${esc(checkInSearch)}" style="font-size:18px;padding:14px;width:100%;box-sizing:border-box;" autocomplete="off">
+      <div class="toolbar" style="margin-top:10px;">
+        <button class="small ${checkInFilters.status==='all'?'primary':''}" data-status="all">All (${ev.participants.length})</button>
+        <button class="small ${checkInFilters.status==='pending'?'primary':''}" data-status="pending">Not Arrived (${ev.participants.length-totalCheckedIn})</button>
+        <button class="small ${checkInFilters.status==='in'?'primary':''}" data-status="in">Arrived (${totalCheckedIn})</button>
+        <div class="spacer"></div>
+        <select id="checkinDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${checkInFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
+        <select id="checkinSort">
+          <option value="heat" ${checkInFilters.sort==='heat'?'selected':''}>Sort: Heat Time</option>
+          <option value="division" ${checkInFilters.sort==='division'?'selected':''}>Sort: Division</option>
+          <option value="name" ${checkInFilters.sort==='name'?'selected':''}>Sort: Name</option>
+          <option value="arrival" ${checkInFilters.sort==='arrival'?'selected':''}>Sort: Arrival Time</option>
+        </select>
+      </div>
     </div>
-    <div class="card table-wrap">
-      <table>
-        <tr><th>Name</th><th>Division</th><th>Heat</th><th>Status</th><th></th></tr>
-        ${!list.length ? `<tr><td colspan="5" style="color:var(--muted);">No matches.</td></tr>` : list.map(p=>{
-          const h = heatOf(p.id);
-          const isTeam = p.division.indexOf("Doubles")!==-1 || p.division==="Relay";
-          const editing = checkInEditingId===p.id;
-          return `<tr>
-            <td>${esc(teamLabel(p))}${isTeam?` <button class="small" data-edit-team="${p.id}" title="Add/edit partner name">${editing?'✕':'✏️'}</button>`:""}
-              ${editing ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-                <input id="ci_partners_${p.id}" placeholder="Partner name(s), comma-separated" value="${esc(p.partnerNames||'')}" style="max-width:220px;">
-                <button class="small primary" data-save-team="${p.id}">Save</button>
-              </div>` : ""}
-            </td>
-            <td>${esc(p.division)}</td>
-            <td>${h?fmt12(h.time)+" · Heat "+h.heatNumberInDivision:"—"}</td>
-            <td>${p.checkedIn ? `<span class="badge green">✓ Checked in ${new Date(p.checkedInAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>` : `<span class="badge gray">Not here yet</span>`}</td>
-            <td>${p.checkedIn ? `<button class="small" data-undo-checkin="${p.id}">Undo</button>` : `<button class="primary small" data-checkin="${p.id}">✓ Check In</button>`}</td>
-          </tr>`;
-        }).join("")}
-      </table>
+    <div class="checkin-grid">
+      ${!list.length ? `<div class="card" style="color:var(--muted);">No matches.</div>` : list.map(p=>{
+        const h = heatOf(p.id);
+        const isTeam = p.division.indexOf("Doubles")!==-1 || p.division==="Relay";
+        const editing = checkInEditingId===p.id;
+        return `<div class="card checkin-card ${p.checkedIn?'checkin-done':''}">
+          <div class="checkin-card-top">
+            <div>
+              <div class="checkin-name">${esc(teamLabel(p))}</div>
+              <div class="checkin-meta">${esc(p.division)}${h?" · "+fmt12(h.time)+" · Heat "+h.heatNumberInDivision:" · not scheduled"}</div>
+            </div>
+            ${p.checkedIn
+              ? `<button class="small" data-undo-checkin="${p.id}">Undo</button>`
+              : `<button class="primary checkin-btn" data-checkin="${p.id}">✓ Check In</button>`}
+          </div>
+          ${p.checkedIn ? `<div class="badge green" style="margin-top:8px;display:inline-block;">✓ Arrived ${new Date(p.checkedInAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>` : ""}
+          ${isTeam ? `<div style="margin-top:8px;">
+            <button class="small ghost" data-edit-team="${p.id}">${editing?'✕ Cancel':(p.partnerNames?'✏️ Edit Partner':'+ Add Partner Name')}</button>
+            ${editing ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+              <input id="ci_partners_${p.id}" placeholder="Partner name(s), comma-separated" value="${esc(p.partnerNames||'')}" style="flex:1;min-width:180px;">
+              <button class="small primary" data-save-team="${p.id}">Save</button>
+            </div>` : (p.partnerNames ? `<div style="font-size:12px;color:var(--muted);margin-top:4px;">with ${esc(p.partnerNames)}</div>` : "")}
+          </div>` : ""}
+        </div>`;
+      }).join("")}
     </div>
   `;
   const searchEl = document.getElementById("checkinSearch");
   searchEl.addEventListener("input", (e)=>{ checkInSearch = e.target.value; renderAll(); });
   searchEl.focus();
   searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length);
+  document.querySelectorAll("[data-status]").forEach(b=> b.addEventListener("click", ()=>{ checkInFilters.status = b.dataset.status; renderAll(); }));
+  document.getElementById("checkinDivision").addEventListener("change",(e)=>{ checkInFilters.division = e.target.value; renderAll(); });
+  document.getElementById("checkinSort").addEventListener("change",(e)=>{ checkInFilters.sort = e.target.value; renderAll(); });
   document.querySelectorAll("[data-checkin]").forEach(b=> b.addEventListener("click", ()=> checkInParticipant(b.dataset.checkin)));
   document.querySelectorAll("[data-undo-checkin]").forEach(b=> b.addEventListener("click", ()=> undoCheckIn(b.dataset.undoCheckin)));
   document.querySelectorAll("[data-edit-team]").forEach(b=>{
