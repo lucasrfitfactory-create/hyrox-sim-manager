@@ -743,6 +743,9 @@ function detectDuplicateParticipants(ev){
   });
   return dupes;
 }
+function detectUnassignedParticipants(ev){
+  return ev.participants.filter(p=> !ev.heats.some(h=>h.participantIds.includes(p.id)));
+}
 function detectEmptyStations(ev){
   const empties = [];
   ev.heats.forEach(h=>{
@@ -891,6 +894,7 @@ function renderDashboard(main){
   const constraintViolations = validateConstraints(ev);
   const coverage = detectMissingVolunteerCoverage(ev);
   const missingRoles = detectMissingRoleCoverage(ev);
+  const unassigned = detectUnassignedParticipants(ev);
 
   const sponsorConfirmed = ev.sponsors.filter(s=>s.status==="Confirmed").length;
 
@@ -929,15 +933,17 @@ function renderDashboard(main){
         <div class="stat ${statClass(incomplete.length)}"><div class="num">${incomplete.length}</div><div class="label">Incomplete Heats</div></div>
         <div class="stat ${statClass(volConflicts.length)}"><div class="num">${volConflicts.length}</div><div class="label">Volunteer Conflicts</div></div>
         <div class="stat ${statClass(constraintViolations.length)}"><div class="num">${constraintViolations.length}</div><div class="label">Constraint Violations</div></div>
+        <div class="stat ${statClass(unassigned.length)}"><div class="num">${unassigned.length}</div><div class="label">Unassigned Participants</div></div>
       </div>
       <div class="warn-list">
         ${dupes.map(p=>`<div class="warn-item red">🔴 Possible duplicate: ${esc(fullName(p))} (${esc(p.email)})</div>`).join("")}
+        ${unassigned.map(p=>`<div class="warn-item red">🔴 ${esc(teamLabel(p))} (${esc(p.division)}) is not assigned to any heat.</div>`).join("")}
         ${incomplete.map(h=>`<div class="warn-item orange">🟠 ${esc(h.division)} Heat ${h.heatNumberInDivision} at ${fmt12(h.time)} is under capacity (${h.participantIds.length}/${CAPACITY[h.division]}).</div>`).join("")}
         ${volConflicts.map(c=>`<div class="warn-item red">🔴 ${esc(c.reason)}</div>`).join("")}
         ${constraintViolations.map(v=>`<div class="warn-item ${v.level}">${v.level==='red'?'🔴':'🟠'} ${esc(v.msg)}</div>`).join("")}
         ${coverage.missing>0?`<div class="warn-item orange">🟠 ${coverage.missing} of ${coverage.need} station slots are unfilled across all heats.</div>`:""}
         ${missingRoles.map(r=>`<div class="warn-item orange">🟠 ${esc(r.role)} needs ${r.needed-r.filled} more volunteer(s) (${r.filled}/${r.needed} filled).</div>`).join("")}
-        ${(!dupes.length && !incomplete.length && !volConflicts.length && !constraintViolations.length && !coverage.missing && !missingRoles.length) ? `<div class="warn-item green">🟢 No issues detected. Event is fully ready.</div>` : ""}
+        ${(!dupes.length && !incomplete.length && !volConflicts.length && !constraintViolations.length && !coverage.missing && !missingRoles.length && !unassigned.length) ? `<div class="warn-item green">🟢 No issues detected. Event is fully ready.</div>` : ""}
       </div>
     </div>
 
