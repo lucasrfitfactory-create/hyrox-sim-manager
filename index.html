@@ -1366,6 +1366,11 @@ function renderHeatGen(main){
         <button class="primary" id="btnGenerate">⚙ Generate / Regenerate Full Schedule</button>
         <span style="color:var(--muted);font-size:12px;">Registrations: ${DIVISIONS.map(d=>`${d}: ${ev.participants.filter(p=>p.division===d).length}`).join(" · ")}</span>
       </div>
+      <div class="toolbar" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+        <span style="color:var(--muted);font-size:12px;">Ran out of room? Add one more heat at the very end of the day — nobody else's time changes:</span>
+        <select id="hg_endOfDayDivision">${DIVISIONS.map(d=>`<option>${esc(d)}</option>`).join("")}</select>
+        <button class="small primary" id="btnAddHeatEndOfDay">+ Add Heat at End of Day</button>
+      </div>
     </div>
 
     ${violations.length ? `<div class="card">
@@ -1399,6 +1404,9 @@ function renderHeatGen(main){
   document.querySelectorAll(".addHeatBtn").forEach(btn=>{
     btn.addEventListener("click", ()=> insertHeat(btn.dataset.division, btn.dataset.after || null));
   });
+  document.getElementById("btnAddHeatEndOfDay").addEventListener("click", ()=>{
+    addHeatAtEndOfDay(document.getElementById("hg_endOfDayDivision").value);
+  });
   wireHeatDragDrop();
   wireAddToHeat();
 }
@@ -1431,6 +1439,25 @@ function insertHeat(division, afterHeatId){
     else ev.heats.push(newHeat);
   }
   rebuildHeatTimesAndNumbers(ev);
+  saveDB(); renderAll();
+}
+/* Bolts an extra heat onto the very end of the day for late/overflow
+   registrations — unlike insertHeat(), this does NOT resort/shift any
+   existing heat. It just picks a time one interval after whatever is
+   currently the last heat of the day (regardless of division) and adds
+   the new heat there, so nobody already scheduled is affected. */
+function addHeatAtEndOfDay(division){
+  const ev = curEvent();
+  pushUndo();
+  const divHeats = ev.heats.filter(h=>h.division===division);
+  const heatNumberInDivision = divHeats.length + 1;
+  let time = ev.startTime;
+  if(ev.heats.length){
+    const lastTime = ev.heats.reduce((latest,h)=> timeToMin(h.time) > timeToMin(latest) ? h.time : latest, ev.heats[0].time);
+    time = addMinutes(lastTime, ev.heatInterval);
+  }
+  const newHeat = { id: uid(), division, heatNumberInDivision, time, participantIds: [] };
+  ev.heats.push(newHeat);
   saveDB(); renderAll();
 }
 function removeHeat(heatId){
