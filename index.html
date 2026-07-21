@@ -2550,6 +2550,7 @@ function renderScheduleTable(ev){
    TV / SIGNAGE START LIST (?view=startlist) — public, no-login, read-only
    ========================================================================= */
 const TV_LOGO_URL = "https://cdn.prod.website-files.com/695d5fde2fc058d6e19d5fff/695d6462b0d560da6de1bfd4_logo.png";
+const TV_YELLOW = "#FFD400"; // HYROX brand yellow, used as this display's secondary accent
 function tvCountdownText(ev){
   // Note: kept as a separate function (rather than inline) since renderStartListTV()
   // calls it once per render and the 30s refresh interval keeps the countdown fresh
@@ -2590,7 +2591,7 @@ function renderStartListTV(){
       const names = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean).map(p=>teamLabel(p)).join(", ") || "Open slot";
       return `<div style="${cardStyle[status]}border-radius:10px;padding:${10*fontScale}px ${12*fontScale}px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-          <div style="font-weight:800;font-size:${1.3*fontScale}em;">${fmt12(h.time)}</div>
+          <div style="font-weight:800;font-size:${1.3*fontScale}em;color:${TV_YELLOW};">${fmt12(h.time)}</div>
           <div style="font-size:${1.1*fontScale}em;">${dot[status]}</div>
         </div>
         <div style="font-size:${1*fontScale}em;margin-top:2px;">${esc(h.division)} · Heat ${h.heatNumberInDivision}</div>
@@ -2602,11 +2603,13 @@ function renderStartListTV(){
   function render(fontScale, cardMinW){
     document.body.innerHTML = `
       <div style="min-height:100vh;background:var(--bg);color:var(--text);box-sizing:border-box;padding:24px 36px;font-family:inherit;display:flex;flex-direction:column;">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:18px;">
-          <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:44px;width:auto;">
+        <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;margin-bottom:18px;">
+          <div style="text-align:left;">
+            <div style="font-size:1.5em;font-weight:800;">${esc(eventTitle)}</div>
+          </div>
+          <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:48px;width:auto;">
           <div style="text-align:right;">
-            <div style="font-size:1.7em;font-weight:800;">${esc(eventTitle)}</div>
-            <div style="font-size:1.05em;color:var(--accent2);font-weight:700;">${esc(countdownText)}</div>
+            <div style="font-size:1.3em;font-weight:800;color:${TV_YELLOW};">${esc(countdownText)}</div>
           </div>
         </div>
         <div id="tvGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(${cardMinW}px,1fr));gap:${10*fontScale}px;align-content:start;">
@@ -2616,26 +2619,24 @@ function renderStartListTV(){
     `;
   }
 
-  // Start from a size guess based on heat count, then measure the actual
-  // rendered height (names make cards taller than a plain time+division
-  // card, so a fixed tier alone isn't reliable) and shrink further if it
-  // still overflows the screen — the goal is everyone visible, no scrolling.
+  // Start generous and let the loop below settle to whatever actually fills
+  // the screen — growing cards up when there's spare room, shrinking them
+  // down when they overflow, instead of only ever shrinking from a fixed
+  // tier (which left a lot of dead space on screens with few heats).
   const total = heats.length;
-  let fontScale, cardMinW;
-  if(total<=12){ cardMinW=250; fontScale=1; }
-  else if(total<=24){ cardMinW=220; fontScale=0.86; }
-  else if(total<=36){ cardMinW=190; fontScale=0.72; }
-  else { cardMinW=165; fontScale=0.58; }
+  let fontScale = 1.3, cardMinW = 300;
 
   render(fontScale, cardMinW);
 
   if(total>0){
-    for(let i=0;i<3;i++){
-      const overflowPx = document.body.scrollHeight - window.innerHeight;
-      if(overflowPx <= 4) break;
-      const ratio = window.innerHeight / document.body.scrollHeight;
-      fontScale = Math.max(0.4, fontScale * ratio * 0.96);
-      cardMinW = Math.max(120, Math.round(cardMinW * Math.sqrt(ratio)));
+    for(let i=0;i<6;i++){
+      const contentH = document.body.scrollHeight;
+      const availH = window.innerHeight;
+      if(Math.abs(contentH-availH) <= 6) break;
+      let ratio = availH / contentH;
+      ratio = 1 + (ratio-1)*0.85; // damp so it converges instead of oscillating
+      fontScale = Math.min(3, Math.max(0.4, fontScale * ratio));
+      cardMinW = Math.min(440, Math.max(120, Math.round(cardMinW * Math.sqrt(ratio))));
       render(fontScale, cardMinW);
     }
   }
