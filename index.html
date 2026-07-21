@@ -2553,24 +2553,24 @@ function updateTvClock(){
   const el = document.getElementById("tvClock");
   if(el) el.textContent = new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
 }
+const TV_LOGO_URL = "https://cdn.prod.website-files.com/695d5fde2fc058d6e19d5fff/695d6462b0d560da6de1bfd4_logo.png";
+function tvCountdownText(ev){
+  const diff = daysUntil(ev);
+  const abs = Math.abs(diff);
+  const d = Math.floor(abs/86400000), h = Math.floor((abs%86400000)/3600000), m = Math.floor((abs%3600000)/60000);
+  if(diff>0) return `${d}d ${h}h ${m}m until race day`;
+  if(diff > -3*3600000) return "Race day is here";
+  return `Race started ${d}d ${h}h ago`;
+}
 function renderStartListTV(){
   const ev = curEvent();
   const now = new Date();
   const nowMin = now.getHours()*60 + now.getMinutes();
   const heats = ev.heats.slice().sort((a,b)=> timeToMin(a.time)-timeToMin(b.time));
-  const total = heats.length;
-
-  // Scale the card grid down as the heat count grows, so the whole day's
-  // schedule fits on one TV screen without scrolling instead of a tall
-  // single-column list nobody can see past the fold.
-  let cardMinW, fontScale;
-  if(total<=16){ cardMinW=230; fontScale=1; }
-  else if(total<=28){ cardMinW=190; fontScale=0.88; }
-  else if(total<=44){ cardMinW=160; fontScale=0.75; }
-  else { cardMinW=140; fontScale=0.62; }
 
   const nameParts = ev.name.split("—").map(s=>s.trim()).filter(Boolean);
   const eventTitle = nameParts.join(" · ");
+  const countdownText = tvCountdownText(ev);
 
   const cardStyle = {
     upcoming: `border:2px solid var(--border);background:var(--bg3);`,
@@ -2579,31 +2579,66 @@ function renderStartListTV(){
   };
   const dot = { upcoming:"", live:"🔴", done:"✅" };
 
-  const cards = heats.map(h=>{
-    const startMin = timeToMin(h.time), endMin = startMin + ev.raceDuration;
-    const status = nowMin>=endMin ? "done" : nowMin>=startMin ? "live" : "upcoming";
-    return `<div style="${cardStyle[status]}border-radius:10px;padding:${10*fontScale}px ${12*fontScale}px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-        <div style="font-weight:800;font-size:${1.3*fontScale}em;">${fmt12(h.time)}</div>
-        <div style="font-size:${1.1*fontScale}em;">${dot[status]}</div>
-      </div>
-      <div style="font-size:${1*fontScale}em;margin-top:2px;">${esc(h.division)}</div>
-      <div style="font-size:${0.85*fontScale}em;color:var(--muted);">Heat ${h.heatNumberInDivision}</div>
-    </div>`;
-  }).join("");
+  function cardsHtml(fontScale){
+    return heats.map(h=>{
+      const startMin = timeToMin(h.time), endMin = startMin + ev.raceDuration;
+      const status = nowMin>=endMin ? "done" : nowMin>=startMin ? "live" : "upcoming";
+      const names = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean).map(p=>teamLabel(p)).join(", ") || "Open slot";
+      return `<div style="${cardStyle[status]}border-radius:10px;padding:${10*fontScale}px ${12*fontScale}px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+          <div style="font-weight:800;font-size:${1.3*fontScale}em;">${fmt12(h.time)}</div>
+          <div style="font-size:${1.1*fontScale}em;">${dot[status]}</div>
+        </div>
+        <div style="font-size:${1*fontScale}em;margin-top:2px;">${esc(h.division)} · Heat ${h.heatNumberInDivision}</div>
+        <div style="font-size:${0.82*fontScale}em;color:var(--muted);margin-top:3px;line-height:1.3;">${esc(names)}</div>
+      </div>`;
+    }).join("");
+  }
 
-  document.body.innerHTML = `
-    <div style="min-height:100vh;background:var(--bg);color:var(--text);box-sizing:border-box;padding:28px 40px;font-family:inherit;">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
-        <div style="font-size:2.2em;font-weight:800;">🏁 ${esc(eventTitle)} · Start Times</div>
-        <div id="tvClock" style="font-size:1.6em;font-weight:700;color:var(--accent2);font-variant-numeric:tabular-nums;"></div>
+  function render(fontScale, cardMinW){
+    document.body.innerHTML = `
+      <div style="min-height:100vh;background:var(--bg);color:var(--text);box-sizing:border-box;padding:24px 36px;font-family:inherit;display:flex;flex-direction:column;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:18px;">
+          <div style="display:flex;align-items:center;gap:18px;">
+            <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:44px;width:auto;">
+            <div>
+              <div style="font-size:1.7em;font-weight:800;">${esc(eventTitle)}</div>
+              <div style="font-size:1.05em;color:var(--accent2);font-weight:700;">${esc(countdownText)}</div>
+            </div>
+          </div>
+          <div id="tvClock" style="font-size:1.4em;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;"></div>
+        </div>
+        <div id="tvGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(${cardMinW}px,1fr));gap:${10*fontScale}px;align-content:start;">
+          ${cardsHtml(fontScale) || `<div style="color:var(--muted);padding:20px;">Schedule not published yet, check back soon.</div>`}
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(${cardMinW}px,1fr));gap:${10*fontScale}px;">
-        ${cards || `<div style="color:var(--muted);padding:20px;">Schedule not published yet, check back soon.</div>`}
-      </div>
-    </div>
-  `;
-  updateTvClock();
+    `;
+    updateTvClock();
+  }
+
+  // Start from a size guess based on heat count, then measure the actual
+  // rendered height (names make cards taller than a plain time+division
+  // card, so a fixed tier alone isn't reliable) and shrink further if it
+  // still overflows the screen — the goal is everyone visible, no scrolling.
+  const total = heats.length;
+  let fontScale, cardMinW;
+  if(total<=12){ cardMinW=250; fontScale=1; }
+  else if(total<=24){ cardMinW=220; fontScale=0.86; }
+  else if(total<=36){ cardMinW=190; fontScale=0.72; }
+  else { cardMinW=165; fontScale=0.58; }
+
+  render(fontScale, cardMinW);
+
+  if(total>0){
+    for(let i=0;i<3;i++){
+      const overflowPx = document.body.scrollHeight - window.innerHeight;
+      if(overflowPx <= 4) break;
+      const ratio = window.innerHeight / document.body.scrollHeight;
+      fontScale = Math.max(0.4, fontScale * ratio * 0.96);
+      cardMinW = Math.max(120, Math.round(cardMinW * Math.sqrt(ratio)));
+      render(fontScale, cardMinW);
+    }
+  }
 }
 
 /* =========================================================================
