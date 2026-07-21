@@ -1425,16 +1425,29 @@ function renderHeatGen(main){
   wireAddToHeat();
 }
 function rebuildHeatTimesAndNumbers(ev){
+  // Heats added via "Add Heat at End of Day" are tagged manualEndOfDay and
+  // are excluded from the normal sequential retiming below — otherwise
+  // inserting/removing a heat anywhere (which calls this to reflow the
+  // whole day) would pull a manually end-of-day-pinned heat back into its
+  // division's normal block, silently discarding the "no shifting" promise
+  // that feature makes.
   let t = ev.startTime;
   const byDiv = {};
   DIVISIONS.forEach(d=>byDiv[d]=[]);
   ev.heats.forEach(h=>{ if(byDiv[h.division]) byDiv[h.division].push(h); });
   const ordered = [];
   DIVISIONS.forEach(div=>{
-    byDiv[div].forEach((h,i)=>{
+    const normal = byDiv[div].filter(h=>!h.manualEndOfDay);
+    const manual = byDiv[div].filter(h=>h.manualEndOfDay);
+    normal.forEach((h,i)=>{
       h.heatNumberInDivision = i+1;
       h.time = t;
       t = addMinutes(t, ev.heatInterval);
+      ordered.push(h);
+    });
+    manual.forEach((h,i)=>{
+      h.heatNumberInDivision = normal.length + i + 1;
+      // time intentionally left as-is — this heat is pinned to the end of the day.
       ordered.push(h);
     });
   });
@@ -1470,7 +1483,7 @@ function addHeatAtEndOfDay(division){
     const lastTime = ev.heats.reduce((latest,h)=> timeToMin(h.time) > timeToMin(latest) ? h.time : latest, ev.heats[0].time);
     time = addMinutes(lastTime, ev.heatInterval);
   }
-  const newHeat = { id: uid(), division, heatNumberInDivision, time, participantIds: [] };
+  const newHeat = { id: uid(), division, heatNumberInDivision, time, participantIds: [], manualEndOfDay: true };
   ev.heats.push(newHeat);
   saveDB(); renderAll();
 }
