@@ -287,6 +287,14 @@ const STORE_KEY = "hyroxSimApp_v1";
    name picker instead of showing the Admin/Volunteer/Athlete choice. */
 const DIRECT_ATHLETE_MODE = new URLSearchParams(window.location.search).get("view") === "athlete";
 
+/* ?view=startlist — a dedicated, no-login, read-only TV/signage display of
+   every heat's start time. Used by fitfactoryfitness.com/hyrox-august-startlist
+   (embedded the same way as the athlete page). Firestore read access is
+   already open with no auth (see Firestore rules), so this is safe to be
+   fully public — it never touches DB.role or the normal login flow, it just
+   takes over the whole page with its own render loop. */
+const DIRECT_STARTLIST_MODE = new URLSearchParams(window.location.search).get("view") === "startlist";
+
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
    console under Authentication > Users.
@@ -339,6 +347,14 @@ function updateSyncBadge(text){
   const el = document.getElementById("saveStatus");
   if(el) el.textContent = text;
 }
+/* Cloud data lands async; render whichever surface is actually on screen.
+   The TV start list took over document.body and has none of the normal
+   #loginScreen/#appShell elements, so it must never fall into renderAll(). */
+function renderWhateverIsShowing(){
+  if(DIRECT_STARTLIST_MODE){ renderStartListTV(); return; }
+  renderAll();
+  refreshLoginScreenIfVisible();
+}
 function initCloudSync(){
   if(!CLOUD_ENABLED || !cloudDocRef) { updateSyncBadge("Local device only — cloud sync not configured"); return; }
   updateSyncBadge("Connecting to cloud…");
@@ -349,8 +365,7 @@ function initCloudSync(){
       if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
-      renderAll();
-      refreshLoginScreenIfVisible();
+      renderWhateverIsShowing();
     } else {
       // First device to connect seeds the cloud with whatever is stored locally.
       cloudDocRef.set({events: DB.events, updatedAt: firebase.firestore.FieldValue.serverTimestamp()});
@@ -366,8 +381,7 @@ function initCloudSync(){
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
-      renderAll();
-      refreshLoginScreenIfVisible();
+      renderWhateverIsShowing();
     }, err=>{
       console.error("Firestore listen failed", err);
       updateSyncBadge("Cloud sync error — check Firestore rules/connection");
@@ -2533,6 +2547,56 @@ function renderScheduleTable(ev){
 }
 
 /* =========================================================================
+   TV / SIGNAGE START LIST (?view=startlist) — public, no-login, read-only
+   ========================================================================= */
+function updateTvClock(){
+  const el = document.getElementById("tvClock");
+  if(el) el.textContent = new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+}
+function renderStartListTV(){
+  const ev = curEvent();
+  const now = new Date();
+  const nowMin = now.getHours()*60 + now.getMinutes();
+  const heats = ev.heats.slice().sort((a,b)=> timeToMin(a.time)-timeToMin(b.time));
+  const rowStyle = {
+    upcoming: "",
+    live: "background:rgba(248,81,73,0.16);",
+    done: "opacity:0.35;"
+  };
+  const rows = heats.map(h=>{
+    const startMin = timeToMin(h.time), endMin = startMin + ev.raceDuration;
+    const status = nowMin>=endMin ? "done" : nowMin>=startMin ? "live" : "upcoming";
+    const statusLabel = status==="live" ? "🔴 RACING NOW" : status==="done" ? "✅ Finished" : "⏳ Upcoming";
+    return `<tr style="${rowStyle[status]}border-bottom:1px solid var(--border);">
+      <td style="padding:14px 16px;font-weight:800;font-size:1.15em;white-space:nowrap;">${fmt12(h.time)}</td>
+      <td style="padding:14px 16px;">${esc(h.division)}</td>
+      <td style="padding:14px 16px;">Heat ${h.heatNumberInDivision}</td>
+      <td style="padding:14px 16px;font-weight:700;white-space:nowrap;">${statusLabel}</td>
+    </tr>`;
+  }).join("");
+  document.body.innerHTML = `
+    <div style="min-height:100vh;background:var(--bg);color:var(--text);box-sizing:border-box;padding:40px 56px;font-family:inherit;">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px;">
+        <div style="font-size:2.4em;font-weight:800;">🏁 ${esc(ev.name)} — Start Times</div>
+        <div id="tvClock" style="font-size:1.8em;font-weight:700;color:var(--accent2);font-variant-numeric:tabular-nums;"></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:1.6em;">
+        <thead>
+          <tr style="text-align:left;color:var(--muted);border-bottom:2px solid var(--border);">
+            <th style="padding:12px 16px;">Start Time</th>
+            <th style="padding:12px 16px;">Division</th>
+            <th style="padding:12px 16px;">Heat</th>
+            <th style="padding:12px 16px;">Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows || `<tr><td colspan="4" style="padding:24px 16px;color:var(--muted);">Schedule not published yet — check back soon.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+  updateTvClock();
+}
+
+/* =========================================================================
    MOBILE VOLUNTEER VIEW
    ========================================================================= */
 function renderMobileVolunteerView(main){
@@ -2795,7 +2859,12 @@ document.addEventListener("keydown", (e)=>{
    INIT
    ========================================================================= */
 loadDB();
-if(DB.role==="admin" && CLOUD_ENABLED){
+if(DIRECT_STARTLIST_MODE){
+  // Public TV/signage display — no login screen, no admin/volunteer state.
+  renderStartListTV();
+  setInterval(updateTvClock, 1000);        // cheap clock tick, no re-render
+  setInterval(renderStartListTV, 30000);   // periodic refresh of live/done status
+} else if(DB.role==="admin" && CLOUD_ENABLED){
   // Don't trust a stale localStorage role — confirm there's a live Firebase
   // session before granting admin UI. This is a UX check only; the real
   // enforcement is the Firestore security rule requiring request.auth.
