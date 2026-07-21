@@ -2549,12 +2549,11 @@ function renderScheduleTable(ev){
 /* =========================================================================
    TV / SIGNAGE START LIST (?view=startlist) — public, no-login, read-only
    ========================================================================= */
-function updateTvClock(){
-  const el = document.getElementById("tvClock");
-  if(el) el.textContent = new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
-}
 const TV_LOGO_URL = "https://cdn.prod.website-files.com/695d5fde2fc058d6e19d5fff/695d6462b0d560da6de1bfd4_logo.png";
 function tvCountdownText(ev){
+  // Note: kept as a separate function (rather than inline) since renderStartListTV()
+  // calls it once per render and the 30s refresh interval keeps the countdown fresh
+  // without needing a per-second clock tick.
   const diff = daysUntil(ev);
   const abs = Math.abs(diff);
   const d = Math.floor(abs/86400000), h = Math.floor((abs%86400000)/3600000), m = Math.floor((abs%3600000)/60000);
@@ -2565,6 +2564,11 @@ function tvCountdownText(ev){
 function renderStartListTV(){
   const ev = curEvent();
   const now = new Date();
+  // Only treat heats as "live"/"done" on the actual event date — comparing
+  // time-of-day alone (the old bug) marked morning heats red every single
+  // day at the matching hour, weeks before the event actually happens.
+  const localDateStr = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
+  const isEventDay = localDateStr === ev.date;
   const nowMin = now.getHours()*60 + now.getMinutes();
   const heats = ev.heats.slice().sort((a,b)=> timeToMin(a.time)-timeToMin(b.time));
 
@@ -2582,7 +2586,7 @@ function renderStartListTV(){
   function cardsHtml(fontScale){
     return heats.map(h=>{
       const startMin = timeToMin(h.time), endMin = startMin + ev.raceDuration;
-      const status = nowMin>=endMin ? "done" : nowMin>=startMin ? "live" : "upcoming";
+      const status = !isEventDay ? "upcoming" : (nowMin>=endMin ? "done" : nowMin>=startMin ? "live" : "upcoming");
       const names = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean).map(p=>teamLabel(p)).join(", ") || "Open slot";
       return `<div style="${cardStyle[status]}border-radius:10px;padding:${10*fontScale}px ${12*fontScale}px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
@@ -2599,21 +2603,17 @@ function renderStartListTV(){
     document.body.innerHTML = `
       <div style="min-height:100vh;background:var(--bg);color:var(--text);box-sizing:border-box;padding:24px 36px;font-family:inherit;display:flex;flex-direction:column;">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:18px;">
-          <div style="display:flex;align-items:center;gap:18px;">
-            <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:44px;width:auto;">
-            <div>
-              <div style="font-size:1.7em;font-weight:800;">${esc(eventTitle)}</div>
-              <div style="font-size:1.05em;color:var(--accent2);font-weight:700;">${esc(countdownText)}</div>
-            </div>
+          <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:44px;width:auto;">
+          <div style="text-align:right;">
+            <div style="font-size:1.7em;font-weight:800;">${esc(eventTitle)}</div>
+            <div style="font-size:1.05em;color:var(--accent2);font-weight:700;">${esc(countdownText)}</div>
           </div>
-          <div id="tvClock" style="font-size:1.4em;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;"></div>
         </div>
         <div id="tvGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(${cardMinW}px,1fr));gap:${10*fontScale}px;align-content:start;">
           ${cardsHtml(fontScale) || `<div style="color:var(--muted);padding:20px;">Schedule not published yet, check back soon.</div>`}
         </div>
       </div>
     `;
-    updateTvClock();
   }
 
   // Start from a size guess based on heat count, then measure the actual
@@ -2907,8 +2907,7 @@ loadDB();
 if(DIRECT_STARTLIST_MODE){
   // Public TV/signage display — no login screen, no admin/volunteer state.
   renderStartListTV();
-  setInterval(updateTvClock, 1000);        // cheap clock tick, no re-render
-  setInterval(renderStartListTV, 30000);   // periodic refresh of live/done status
+  setInterval(renderStartListTV, 30000);   // periodic refresh of countdown + live/done status
 } else if(DB.role==="admin" && CLOUD_ENABLED){
   // Don't trust a stale localStorage role — confirm there's a live Firebase
   // session before granting admin UI. This is a UX check only; the real
