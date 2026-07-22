@@ -337,6 +337,7 @@ const firebaseConfig = {
 const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
 let cloudDocRef = null;
 let applyingRemoteUpdate = false;
+let initialCloudSyncDone = false; // true only after the first Firestore fetch has merged in — blocks saveDB() from pushing a stale local/default snapshot over newer cloud data before that merge happens (this exact race once overwrote real participant data with a stale local cache).
 if(CLOUD_ENABLED){
   try{
     firebase.initializeApp(firebaseConfig);
@@ -370,6 +371,7 @@ function initCloudSync(){
       // First device to connect seeds the cloud with whatever is stored locally.
       cloudDocRef.set({events: DB.events, updatedAt: firebase.firestore.FieldValue.serverTimestamp()});
     }
+    initialCloudSyncDone = true;
     updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
     cloudDocRef.onSnapshot(snap=>{
       if(!snap.exists) return;
@@ -463,7 +465,7 @@ function saveDB(immediate, skipCloud){
   clearTimeout(saveTimer);
   const doSave = ()=>{
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
-    if(CLOUD_ENABLED && cloudDocRef && !skipCloud && !applyingRemoteUpdate){
+    if(CLOUD_ENABLED && cloudDocRef && !skipCloud && !applyingRemoteUpdate && initialCloudSyncDone){
       updateSyncBadge("Syncing…");
       cloudDocRef.set({events: DB.events, updatedAt: firebase.firestore.FieldValue.serverTimestamp()})
         .then(()=> updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString()))
@@ -2762,7 +2764,7 @@ function renderParticipantView(main){
    LOGIN / LOGOUT
    ========================================================================= */
 function logout(){
-  DB.role=null; DB.currentVolunteerId=null; DB.currentParticipantId=null; saveDB();
+  DB.role=null; DB.currentVolunteerId=null; DB.currentParticipantId=null; saveDB(false, true);
   if(CLOUD_ENABLED && firebase.auth().currentUser){ firebase.auth().signOut(); }
   showLogin();
 }
@@ -2828,7 +2830,7 @@ function renderParticipantResults(){
     + (list.length>capped.length ? `<div style="color:var(--muted);font-size:12px;text-align:center;padding:6px;">+${list.length-capped.length} more — keep typing to narrow it down</div>` : "");
   container.querySelectorAll("[data-pid]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
-      DB.role="participant"; DB.currentParticipantId = btn.dataset.pid; saveDB(true); enterApp();
+      DB.role="participant"; DB.currentParticipantId = btn.dataset.pid; saveDB(true, true); enterApp();
     });
   });
 }
@@ -2858,7 +2860,7 @@ function tryAdminLogin(){
   document.getElementById("adminPasswordError").style.display = "none";
   btn.disabled = true; btn.textContent = "Signing in…";
   firebase.auth().signInWithEmailAndPassword(email, pass)
-    .then(()=>{ DB.role="admin"; DB.adminTier = computeAdminTier(email); saveDB(true); enterApp(); })
+    .then(()=>{ DB.role="admin"; DB.adminTier = computeAdminTier(email); saveDB(true, true); enterApp(); })
     .catch((err)=>{ console.error("Admin sign-in failed", err); showError(); })
     .finally(()=>{ btn.disabled = false; btn.textContent = "Continue"; });
 }
@@ -2885,7 +2887,7 @@ document.getElementById("btnVolunteerLogin").addEventListener("click", ()=>{
   document.getElementById("volunteerPicker").classList.remove("hidden");
 });
 document.getElementById("btnVolunteerContinue").addEventListener("click", ()=>{
-  DB.role="volunteer"; DB.currentVolunteerId = document.getElementById("volunteerSelect").value; saveDB(true); enterApp();
+  DB.role="volunteer"; DB.currentVolunteerId = document.getElementById("volunteerSelect").value; saveDB(true, true); enterApp();
 });
 document.getElementById("btnParticipantLogin").addEventListener("click", ()=>{
   setActiveRoleButton("btnParticipantLogin");
@@ -2929,7 +2931,7 @@ if(DIRECT_STARTLIST_MODE){
   // enforcement is the Firestore security rule requiring request.auth.
   showLogin();
   firebase.auth().onAuthStateChanged(user=>{
-    if(user){ DB.adminTier = computeAdminTier(user.email); enterApp(); } else { DB.role=null; saveDB(); showLogin(); }
+    if(user){ DB.adminTier = computeAdminTier(user.email); enterApp(); } else { DB.role=null; saveDB(false, true); showLogin(); }
   });
 } else if(DB.role){
   enterApp();
