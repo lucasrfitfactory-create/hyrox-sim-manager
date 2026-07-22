@@ -2037,8 +2037,18 @@ function renderSettingsTab(main){
     </div>
 
     <div class="card">
-      <div class="section-title"><h3>Backup</h3>${help("Downloads everything in the shared database right now as one JSON file — every event, participant, heat, volunteer, sponsor, and assignment. This is a snapshot at this exact moment, not a live/automatic backup, and nothing updates it after you download it. Grab one before events that matter, or any time you want a restore point you control yourself. Restoring from it isn't a button click: it requires pasting the file's contents back into the database via the browser console while signed in as admin — the file includes the exact command to run.")}</div>
+      <div class="section-title"><h3>Backup</h3>${help("Downloads everything in the shared database right now as one JSON file — every event, participant, heat, volunteer, sponsor, and assignment. This is a snapshot at this exact moment, not a live/automatic backup, and nothing updates it after you download it. Grab one before events that matter, or any time you want a restore point you control yourself.")}</div>
       <div class="toolbar"><button class="primary" id="btnDownloadBackup">⬇ Download Backup Now</button></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Restore from Backup</h3>${help("Loads a backup JSON file (from the Download Backup Now button above) and replaces the ENTIRE shared database with it — every event, not just the current one. Shows you exactly what's in the file first, so you can check it before anything is overwritten. There is no undo once you confirm this.")}</div>
+      <div class="toolbar">
+        <input type="file" id="restoreFileInput" accept="application/json,.json" style="display:none;">
+        <button class="small" id="btnChooseRestoreFile">Choose Backup File…</button>
+        <span id="restoreFileName" style="font-size:12px;color:var(--muted);"></span>
+      </div>
+      <div id="restorePreview"></div>
     </div>
   `;
   const signOutBtn = document.getElementById("btnSettingsSignOut");
@@ -2071,6 +2081,66 @@ function renderSettingsTab(main){
     };
     const stamp = new Date().toISOString().replace(/[:.]/g,"-");
     download(`hyrox-backup_${stamp}.json`, JSON.stringify(payload, null, 2), "application/json");
+  });
+  const chooseRestoreBtn = document.getElementById("btnChooseRestoreFile");
+  const restoreFileInput = document.getElementById("restoreFileInput");
+  const restorePreview = document.getElementById("restorePreview");
+  const restoreFileNameEl = document.getElementById("restoreFileName");
+  if(chooseRestoreBtn) chooseRestoreBtn.addEventListener("click", ()=> restoreFileInput.click());
+  if(restoreFileInput) restoreFileInput.addEventListener("change", (e)=>{
+    const file = e.target.files[0];
+    restorePreview.innerHTML = "";
+    restoreFileNameEl.textContent = file ? file.name : "";
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      let parsed;
+      try{ parsed = JSON.parse(reader.result); }
+      catch(err){
+        restorePreview.innerHTML = `<div style="color:var(--red);font-size:13px;margin-top:8px;">This file isn't valid JSON — refusing to import. (${esc(err.message)})</div>`;
+        return;
+      }
+      // Validate shape before showing anything as importable — refuse anything that
+      // doesn't look like a real backup rather than guessing and risking a corrupted DB.
+      if(!parsed || typeof parsed.events !== "object" || Array.isArray(parsed.events) || !Object.keys(parsed.events).length){
+        restorePreview.innerHTML = `<div style="color:var(--red);font-size:13px;margin-top:8px;">This doesn't look like a valid backup file — expected an "events" object with at least one event, didn't find one.</div>`;
+        return;
+      }
+      const evList = Object.values(parsed.events);
+      const badEvent = evList.find(ev => !ev || typeof ev.name !== "string" || !Array.isArray(ev.participants) || !Array.isArray(ev.heats));
+      if(badEvent){
+        restorePreview.innerHTML = `<div style="color:var(--red);font-size:13px;margin-top:8px;">At least one event in this file is missing expected fields (name/participants/heats) — refusing to import to avoid corrupting the database.</div>`;
+        return;
+      }
+      const rows = evList.map(ev => `<tr><td>${esc(ev.name)}</td><td>${esc(ev.date||"")}</td><td>${ev.participants.length}</td><td>${ev.heats.length}</td></tr>`).join("");
+      restorePreview.innerHTML = `
+        <div style="margin-top:10px;font-size:13px;">
+          <b>This file contains:</b>
+          <table style="margin-top:6px;">
+            <tr><th>Event</th><th>Date</th><th>Participants</th><th>Heats</th></tr>
+            ${rows}
+          </table>
+          ${parsed._backedUpAt ? `<div style="color:var(--muted);font-size:12px;margin-top:6px;">Backup taken: ${esc(parsed._backedUpAt)}</div>` : ""}
+          <div style="color:var(--red);margin-top:10px;font-weight:600;">Importing replaces the ENTIRE live shared database with exactly this. Any event currently live that isn't listed above will be deleted. This cannot be undone.</div>
+          <div class="toolbar" style="margin-top:10px;">
+            <button class="danger" id="btnConfirmRestore">Confirm Import &amp; Overwrite Live Database</button>
+            <button class="small" id="btnCancelRestore">Cancel</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("btnCancelRestore").addEventListener("click", ()=>{
+        restorePreview.innerHTML = ""; restoreFileInput.value = ""; restoreFileNameEl.textContent = "";
+      });
+      document.getElementById("btnConfirmRestore").addEventListener("click", ()=>{
+        if(!confirm(`Final check: this replaces the entire live database with the ${evList.length} event(s) shown above, for everyone, right now. This cannot be undone. Proceed?`)) return;
+        DB.events = parsed.events;
+        if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
+        saveDB(true);
+        alert("Import complete — the live database has been replaced and is syncing to the cloud now.");
+        renderAll();
+      });
+    };
+    reader.readAsText(file);
   });
   document.querySelectorAll("[data-switch]").forEach(b=>{
     b.addEventListener("click", ()=>{ DB.currentEventId = b.dataset.switch; saveDB(); renderAll(); });
