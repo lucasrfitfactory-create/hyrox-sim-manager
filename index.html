@@ -269,6 +269,7 @@ document.getElementById("loginLogo").classList.remove("hidden");
 const DIVISIONS = ["Men's Doubles","Mixed Doubles","Women's Doubles","Men's Solo","Women's Solo","Relay"];
 const CAPACITY = {"Men's Solo":2,"Women's Solo":2,"Men's Doubles":2,"Mixed Doubles":2,"Women's Doubles":2,"Relay":1};
 const DEFAULT_STATIONS = ["SkiErg","Sled Push","Sled Pull","Burpee Broad Jumps","RowErg","Farmer's Carry","Sandbag Lunges","Wall Balls"];
+const VOLUNTEER_ARRIVAL_TIME = "07:30"; // Fixed policy: every volunteer is asked to arrive at 7:30 AM regardless of event start time or their assigned heats.
 const ROLE_SLOTS = {"Front Desk":2,"Heat Starter":1,"Hydration Station":2};
 const SPONSOR_STATUSES = ["Waiting for response","Confirmed","Declined"];
 const PAYMENT_STATUSES = ["Paid","Pending","Complimentary"];
@@ -677,6 +678,31 @@ function getUnavailability(ev, vol){
   const start = addMinutes(heat.time, -20);
   const end = addMinutes(heat.time, ev.raceDuration);
   return {start, end, raceTime:heat.time, heat};
+}
+/* Groups a volunteer's per-heat station assignments into contiguous runs so the
+   mobile view can say "Sled Push from 12:30 PM to 4:10 PM" instead of listing
+   every single heat — a run is a same-station block where each heat starts
+   exactly ev.heatInterval minutes after the previous one. A run's end time
+   uses the same "heat time + raceDuration" convention as getUnavailability()
+   above, since that's when the last team through that station actually finishes. */
+function summarizeStationAssignments(ev, assignments){
+  const resolved = assignments
+    .map(a=>{ const h = ev.heats.find(x=>x.id===a.heatId); return h ? {station:a.station, timeMin:timeToMin(h.time)} : null; })
+    .filter(Boolean)
+    .sort((a,b)=> a.timeMin-b.timeMin || a.station.localeCompare(b.station));
+  const runs = [];
+  resolved.forEach(r=>{
+    const last = runs[runs.length-1];
+    if(last && last.station===r.station && r.timeMin-last.lastTimeMin===ev.heatInterval){
+      last.lastTimeMin = r.timeMin; last.count++;
+    } else {
+      runs.push({station:r.station, firstTimeMin:r.timeMin, lastTimeMin:r.timeMin, count:1});
+    }
+  });
+  return runs.map(r=>{
+    if(r.count<=1) return `${r.station} @ ${fmt12(minToTime(r.firstTimeMin))}`;
+    return `${r.station} from ${fmt12(minToTime(r.firstTimeMin))} to ${fmt12(minToTime(r.lastTimeMin+ev.raceDuration))}`;
+  });
 }
 function timeOverlaps(t, start, end){
   const tm=timeToMin(t), s=timeToMin(start), e=timeToMin(end);
@@ -2752,18 +2778,19 @@ function renderMobileVolunteerView(main){
   if(!vol){ main.innerHTML = `<div class="card">Volunteer not found for this event. <button onclick="logout()">Switch user</button></div>`; return; }
   const unavail = getUnavailability(ev, vol);
   const assignments = ev.stationAssignments.filter(a=>a.volunteerId===vol.id);
+  const stationSummaries = assignments.length ? summarizeStationAssignments(ev, assignments) : [];
   main.innerHTML = `
     <div id="mobileView">
       <div class="mv-hero"><h2>👋 Hi ${esc(vol.name)}</h2><div class="sub">${esc(ev.name)}</div></div>
 
-      <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">Assigned Station${assignments.length>1?"s":""}</div>
-        <div class="big">${assignments.length ? assignments.map(a=>{const h=ev.heats.find(x=>x.id===a.heatId); return a.station+(h?" @ "+fmt12(h.time):"");}).join(", ") : "Not yet assigned"}</div></div></div>
+      <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">Assigned Station${stationSummaries.length>1?"s":""}</div>
+        <div class="big">${stationSummaries.length ? stationSummaries.join(", ") : "Not yet assigned"}</div></div></div>
 
       ${vol.participating ? `<div class="mv-block"><div class="icon">🏁</div><div><div class="lbl">Your Race Time</div>
         <div class="big">${unavail?fmt12(unavail.raceTime):"Not yet scheduled"}</div></div></div>` : ""}
 
       <div class="mv-block"><div class="icon">⏰</div><div><div class="lbl">Arrival Time</div>
-        <div class="big">${fmt12(addMinutes(ev.startTime,-30))}</div></div></div>
+        <div class="big">${fmt12(VOLUNTEER_ARRIVAL_TIME)}</div></div></div>
 
       ${unavail ? `<div class="mv-block"><div class="icon">🚫</div><div><div class="lbl">Unavailable Window</div>
         <div class="big">${fmt12(unavail.start)} – ${fmt12(unavail.end)}</div></div></div>
