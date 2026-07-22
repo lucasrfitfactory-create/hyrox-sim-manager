@@ -454,7 +454,7 @@ function loadDB(){
     try{ DB = JSON.parse(raw); }catch(e){ DB = null; }
   }
   if(!DB){
-    const ev = defaultEvent("HYROX Simulation — August 9", "2026-08-09");
+    const ev = defaultEvent("HYROX Simulation - August 9", "2026-08-09");
     seedDemoData(ev);
     DB = { events: {[ev.id]: ev}, currentEventId: ev.id, role: null, currentVolunteerId: null, currentParticipantId: null };
   }
@@ -2586,7 +2586,7 @@ function renderStartListTV(){
   const nowMin = now.getHours()*60 + now.getMinutes();
   const heats = ev.heats.slice().sort((a,b)=> timeToMin(a.time)-timeToMin(b.time));
 
-  const nameParts = ev.name.split("—").map(s=>s.trim()).filter(Boolean);
+  const nameParts = ev.name.split(/\s+[-\u2013\u2014]\s+/).map(s=>s.trim()).filter(Boolean);
   const eventTitle = nameParts.join(" · ");
   const countdownText = tvCountdownText(ev);
 
@@ -2801,7 +2801,7 @@ function showLogin(){
     document.getElementById("loginCard").classList.add("athlete-mode");
     // Event names are typically "HYROX Simulation — August 9" — split so the
     // date gets its own compact badge instead of wrapping awkwardly in the h1.
-    const nameParts = curEvent().name.split("—").map(s=>s.trim());
+    const nameParts = curEvent().name.split(/\s+[-\u2013\u2014]\s+/).map(s=>s.trim());
     document.getElementById("loginTitle").textContent = "🏁 " + (nameParts[0] || curEvent().name);
     const badge = document.getElementById("loginEventBadge");
     if(nameParts[1]){ badge.textContent = nameParts[1]; badge.classList.remove("hidden"); }
