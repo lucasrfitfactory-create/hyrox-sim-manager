@@ -685,7 +685,7 @@ function getUnavailability(ev, vol){
    exactly ev.heatInterval minutes after the previous one. A run's end time
    uses the same "heat time + raceDuration" convention as getUnavailability()
    above, since that's when the last team through that station actually finishes. */
-function summarizeStationAssignments(ev, assignments){
+function groupStationRuns(ev, assignments){
   const resolved = assignments
     .map(a=>{ const h = ev.heats.find(x=>x.id===a.heatId); return h ? {station:a.station, timeMin:timeToMin(h.time)} : null; })
     .filter(Boolean)
@@ -699,7 +699,10 @@ function summarizeStationAssignments(ev, assignments){
       runs.push({station:r.station, firstTimeMin:r.timeMin, lastTimeMin:r.timeMin, count:1});
     }
   });
-  return runs.map(r=>{
+  return runs;
+}
+function summarizeStationAssignments(ev, assignments){
+  return groupStationRuns(ev, assignments).map(r=>{
     if(r.count<=1) return `${r.station} @ ${fmt12(minToTime(r.firstTimeMin))}`;
     return `${r.station} from ${fmt12(minToTime(r.firstTimeMin))} to ${fmt12(minToTime(r.lastTimeMin+ev.raceDuration))}`;
   });
@@ -1700,10 +1703,8 @@ function renderVolunteerTimeline(ev, v){
   if(unavail){
     blocks.push({start:timeToMin(unavail.start), end:timeToMin(unavail.end), color:"#f85149", label:"Racing/Unavailable"});
   }
-  ev.stationAssignments.filter(a=>a.volunteerId===v.id).forEach(a=>{
-    const h = ev.heats.find(x=>x.id===a.heatId); if(!h) return;
-    const s=timeToMin(h.time), e=s+ev.raceDuration;
-    blocks.push({start:s,end:e,color:"#3b9dff",label:a.station});
+  groupStationRuns(ev, ev.stationAssignments.filter(a=>a.volunteerId===v.id)).forEach(r=>{
+    blocks.push({start:r.firstTimeMin, end:r.lastTimeMin+ev.raceDuration, color:"#3b9dff", label:r.station});
   });
   const hourMarks = [];
   for(let t=Math.ceil(dayStart/60)*60; t<dayEnd; t+=60){
