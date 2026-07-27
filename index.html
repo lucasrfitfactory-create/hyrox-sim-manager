@@ -422,6 +422,7 @@ function teamLabel(p){
   }
   return fullName(p);
 }
+function activeParticipants(ev){ return ev.participants.filter(p=>!p.canceled); }
 function athleteCount(p){
   if(p.division.indexOf("Doubles")!==-1) return 2;
   if(p.division==="Relay"){
@@ -549,7 +550,7 @@ function collectedAmount(p){
 function generateHeats(ev){
   pushUndo();
   const groups = {};
-  DIVISIONS.forEach(d=> groups[d] = ev.participants.filter(p=>p.division===d));
+  DIVISIONS.forEach(d=> groups[d] = ev.participants.filter(p=>p.division===d && !p.canceled));
 
   // Pull out manual-lock participants first (they get placed after generic layout, by heat index within division)
   let heats = [];
@@ -634,7 +635,7 @@ function generateHeats(ev){
 function validateConstraints(ev){
   const violations = [];
   const heatOf = pid => ev.heats.find(h=>h.participantIds.includes(pid));
-  ev.participants.forEach(p=>{
+  activeParticipants(ev).forEach(p=>{
     const h = heatOf(p.id);
     (p.constraints||[]).forEach(c=>{
       if(c.type==="mustBefore" && c.time){
@@ -782,14 +783,14 @@ function autoAssignStations(ev){
    ========================================================================= */
 function detectDuplicateParticipants(ev){
   const seen = {}; const dupes = [];
-  ev.participants.forEach(p=>{
+  activeParticipants(ev).forEach(p=>{
     const key = (p.firstName+"|"+p.lastName+"|"+p.email).toLowerCase();
     if(seen[key]) dupes.push(p); else seen[key]=p;
   });
   return dupes;
 }
 function detectUnassignedParticipants(ev){
-  return ev.participants.filter(p=> !ev.heats.some(h=>h.participantIds.includes(p.id)));
+  return activeParticipants(ev).filter(p=> !ev.heats.some(h=>h.participantIds.includes(p.id)));
 }
 function detectEmptyStations(ev){
   const empties = [];
@@ -926,10 +927,11 @@ function renderDashboard(main){
   const d = Math.floor(abs/86400000), h=Math.floor((abs%86400000)/3600000), m=Math.floor((abs%3600000)/60000);
   const countdownLabel = diff>0 ? `${d}d ${h}h ${m}m until event` : `Event started ${d}d ${h}h ago`;
 
+  const active = activeParticipants(ev);
   const byDiv = {}; DIVISIONS.forEach(dv=>byDiv[dv]=0);
-  ev.participants.forEach(p=> byDiv[p.division] = (byDiv[p.division]||0)+1);
-  const totalReg = ev.participants.length;
-  const totalAthletes = ev.participants.reduce((s,p)=>s+athleteCount(p),0);
+  active.forEach(p=> byDiv[p.division] = (byDiv[p.division]||0)+1);
+  const totalReg = active.length;
+  const totalAthletes = active.reduce((s,p)=>s+athleteCount(p),0);
   const PARTICIPANT_GOAL = 100;
   const goalPct = Math.min(100, Math.round((totalAthletes/PARTICIPANT_GOAL)*100));
 
@@ -958,7 +960,7 @@ function renderDashboard(main){
         <div class="label">Total Participants ${help("Actual athlete headcount, not registration rows — a Doubles/Mixed Doubles entry counts as 2 people. Relay counts 1 + however many names are in that entry's Partner Names field (comma-separated), so fill that in for an accurate count. Goal line is 100 participants.")}</div>
         <div style="background:var(--bg3);border-radius:6px;height:6px;margin-top:6px;overflow:hidden;"><div style="background:${goalPct>=100?'var(--green)':'var(--accent)'};height:100%;width:${goalPct}%;"></div></div>
       </div>
-      <div class="stat"><div class="num">${ev.participants.filter(p=>p.checkedIn).length} <span style="font-size:13px;color:var(--muted);font-weight:400;">/ ${ev.participants.length}</span></div><div class="label">Checked In</div></div>
+      <div class="stat"><div class="num">${active.filter(p=>p.checkedIn).length} <span style="font-size:13px;color:var(--muted);font-weight:400;">/ ${active.length}</span></div><div class="label">Checked In</div></div>
       <div class="stat"><div class="num">${ev.heats.length}</div><div class="label">Heats Scheduled</div></div>
       <div class="stat"><div class="num">${ev.sponsors.length}</div><div class="label">Sponsors (${sponsorConfirmed} confirmed)</div></div>
       <div class="stat"><div class="num">${ev.volunteers.length}</div><div class="label">Volunteers</div></div>
@@ -1011,7 +1013,7 @@ function renderFinancialDashboard(ev){
 
   return `
     <div class="card">
-      <div class="section-title"><h3>Admin Financial Dashboard</h3>${help("Standard revenue = full list price for every registration. Actual/collected revenue reflects overrides, discounts, complimentary entries, and payment status. Use manual overrides on the Participants tab.")}</div>
+      <div class="section-title"><h3>Admin Financial Dashboard</h3>${help("Standard revenue = full list price for every registration. Actual/collected revenue reflects overrides, discounts, complimentary entries, and payment status. Canceled participants are intentionally still included here since a cancellation is not a refund, their money still counts even though they have been pulled off the schedule. Use manual overrides on the Participants tab.")}</div>
       <div class="grid cols-4" style="margin-bottom:16px;">
         <div class="stat"><div class="num">$${totalStd.toFixed(0)}</div><div class="label">Standard Revenue</div></div>
         <div class="stat green"><div class="num">$${totalCollected.toFixed(0)}</div><div class="label">Actual Collected</div></div>
@@ -1051,10 +1053,11 @@ function wireFinancialDashboard(ev){
   }
   const btn = document.getElementById("btnExportFinancial");
   if(btn) btn.addEventListener("click", ()=>{
-    const header = ["Participant/Team","Division","Member Status","Standard Price","Discount","Amount Collected","Payment Status"];
+    const header = ["Participant/Team","Division","Member Status","Standard Price","Discount","Amount Collected","Payment Status","Status"];
     const rows = ev.participants.map(p=>[
       teamLabel(p),
-      p.division, p.memberStatus, standardPrice(p), p.discount||0, collectedAmount(p), p.paymentStatus
+      p.division, p.memberStatus, standardPrice(p), p.discount||0, collectedAmount(p), p.paymentStatus,
+      p.canceled ? ("Canceled - " + (p.cancelReason||"")) : "Active"
     ]);
     const csv = Papa.unparse([header, ...rows]);
     download(`${ev.name.replace(/[^a-z0-9]+/gi,'_')}_financial_summary.csv`, csv);
@@ -1190,7 +1193,7 @@ function renderParticipants(main){
 
   main.innerHTML = `
     <div class="toolbar">
-      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Participants</h2>${help("All race registrations. Doubles/Mixed/Relay each represent one team entry; Solo represents one athlete. Duplicate emails are flagged automatically. Import a CSV to bulk-load registrations. Check rows and use Delete Selected to remove several at once.")}</div>
+      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Participants</h2>${help("All race registrations. Doubles/Mixed/Relay each represent one team entry; Solo represents one athlete. Duplicate emails are flagged automatically. Import a CSV to bulk-load registrations. Check rows and use Delete Selected to remove several at once. Cancel (with a reason) pulls someone off the schedule and out of headcounts/check-in without deleting their record or their payment — use this instead of Delete whenever they still owe money or already paid and won\u2019t be refunded. Delete is permanent and should only be used for a genuine data-entry mistake.")}</div>
       <div class="spacer"></div>
       ${selectedParticipantIds.size ? `<button class="small danger" id="btnBulkDeleteParticipants">Delete Selected (${selectedParticipantIds.size})</button>` : ""}
       <button class="small" id="btnImportCsv">⬆ Import CSV</button>
@@ -1200,16 +1203,16 @@ function renderParticipants(main){
     <div class="card table-wrap">
       <table>
         <tr><th><input type="checkbox" id="selectAllParticipants" ${allSelected?'checked':''}></th><th>Name / Team</th><th>Division</th><th>Member</th><th>Contact</th><th>Constraints</th><th>Price</th><th>Payment</th><th></th></tr>
-        ${list.map(p=>`<tr style="${dupes.has(p.id)?'background:var(--red-bg);':''}">
+        ${list.map(p=>`<tr style="${dupes.has(p.id)?'background:var(--red-bg);':''}${p.canceled?'opacity:0.55;':''}">
           <td><input type="checkbox" class="pSelectCheckbox" data-id="${p.id}" ${selectedParticipantIds.has(p.id)?'checked':''}></td>
-          <td>${esc(teamLabel(p))}${dupes.has(p.id)?' <span class="badge red">DUP</span>':''}</td>
+          <td>${p.canceled?`<span style="text-decoration:line-through;">${esc(teamLabel(p))}</span>`:esc(teamLabel(p))}${dupes.has(p.id)?' <span class="badge red">DUP</span>':''}${p.canceled?` <span class="badge red" title="${esc(p.cancelReason||'')}">CANCELED</span>`:''}</td>
           <td>${esc(p.division)}</td>
           <td>${esc(p.memberStatus)}</td>
           <td>${esc(p.email)}<br><span style="color:var(--muted)">${esc(p.phone)}</span></td>
           <td>${(p.constraints||[]).map(c=>`<span class="badge gray">${constraintLabel(c)}</span>`).join(" ")}</td>
           <td>$${actualPrice(p).toFixed(0)} ${actualPrice(p)!==standardPrice(p)?`<span style="color:var(--muted);text-decoration:line-through;font-size:11px;">$${standardPrice(p)}</span>`:""}</td>
           <td>${paymentBadge(p.paymentStatus)}</td>
-          <td><button class="small" onclick="editParticipant('${p.id}')">Edit</button> <button class="small danger" onclick="deleteParticipant('${p.id}')">Del</button></td>
+          <td><button class="small" onclick="editParticipant('${p.id}')">Edit</button> ${p.canceled?`<button class="small" onclick="reactivateParticipant('${p.id}')">Reactivate</button>`:`<button class="small danger" onclick="cancelParticipant('${p.id}')">Cancel</button>`} <button class="small danger" onclick="deleteParticipant('${p.id}')">Del</button></td>
         </tr>`).join("")}
       </table>
     </div>
@@ -1281,7 +1284,7 @@ function renderConstraintRows(constraints, ev){
     <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;" data-idx="${i}">
       <select class="c_type" style="flex:1;">${CONSTRAINT_TYPES.map(t=>`<option value="${t.v}" ${t.v===c.type?'selected':''}>${t.label}</option>`).join("")}</select>
       <input class="c_time" type="time" value="${c.time||''}" style="width:110px;${c.type==='mustBefore'||c.type==='cannotBefore'?'':'display:none;'}">
-      <select class="c_athlete" style="flex:1;${c.type==='afterAthlete'?'':'display:none;'}"><option value="">Select athlete</option>${ev.participants.map(p=>`<option value="${p.id}" ${p.id===c.athleteId?'selected':''}>${esc(fullName(p))}</option>`).join("")}</select>
+      <select class="c_athlete" style="flex:1;${c.type==='afterAthlete'?'':'display:none;'}"><option value="">Select athlete</option>${ev.participants.filter(p=>!p.canceled).map(p=>`<option value="${p.id}" ${p.id===c.athleteId?'selected':''}>${esc(fullName(p))}</option>`).join("")}</select>
       <button class="small danger" onclick="this.parentElement.remove()">✕</button>
     </div>
   `).join("");
@@ -1340,6 +1343,33 @@ function deleteParticipant(id){
   ev.participants=ev.participants.filter(p=>p.id!==id);
   ev.heats.forEach(h=>{ const idx=h.participantIds.indexOf(id); if(idx>=0) h.participantIds.splice(idx,1); });
   selectedParticipantIds.delete(id);
+  saveDB(); renderAll();
+}
+/* Cancel keeps the participant's record (and their payment status/amount, so
+   it keeps counting on the Financial Dashboard) but pulls them out of any
+   heat and out of every headcount/check-in/search surface, since a
+   cancellation isn't a refund — Lucas still keeps their money, they're just
+   not racing. This is deliberately distinct from deleteParticipant() above,
+   which is a genuine permanent removal for data-entry mistakes. */
+function cancelParticipant(id){
+  const ev = curEvent();
+  const p = ev.participants.find(x=>x.id===id); if(!p) return;
+  const reason = prompt(`Cancel ${teamLabel(p)}? They'll be pulled from the schedule and out of headcounts, but their record and payment status stay — their money still counts on the Financial Dashboard since this isn't a refund.\n\nEnter a reason:`, "");
+  if(reason===null) return;
+  if(!reason.trim()){ alert("Please enter a reason for the cancellation."); return; }
+  pushUndo();
+  p.canceled = true;
+  p.cancelReason = reason.trim();
+  ev.heats.forEach(h=>{ const idx=h.participantIds.indexOf(id); if(idx>=0) h.participantIds.splice(idx,1); });
+  saveDB(); renderAll();
+}
+function reactivateParticipant(id){
+  const ev = curEvent();
+  const p = ev.participants.find(x=>x.id===id); if(!p) return;
+  if(!confirm(`Reactivate ${teamLabel(p)}? This clears their cancellation, but they won't be automatically placed back into a heat — you'll need to add them manually from the Schedule tab.`)) return;
+  pushUndo();
+  p.canceled = false;
+  p.cancelReason = "";
   saveDB(); renderAll();
 }
 
@@ -1409,7 +1439,7 @@ function renderHeatGen(main){
       </div>
       <div class="toolbar">
         <button class="primary" id="btnGenerate">⚙ Generate / Regenerate Full Schedule</button>
-        <span style="color:var(--muted);font-size:12px;">Registrations: ${DIVISIONS.map(d=>`${d}: ${ev.participants.filter(p=>p.division===d).length}`).join(" · ")}</span>
+        <span style="color:var(--muted);font-size:12px;">Registrations: ${DIVISIONS.map(d=>`${d}: ${ev.participants.filter(p=>p.division===d && !p.canceled).length}`).join(" · ")}</span>
       </div>
       <div class="toolbar" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
         <span style="color:var(--muted);font-size:12px;">Ran out of room? Add one more heat at the very end of the day — nobody else's time changes:</span>
@@ -1534,7 +1564,7 @@ function removeHeat(heatId){
 }
 function heatColHtml(ev, h){
   const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
-  const candidates = ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id));
+  const candidates = ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id) && !p.canceled);
   return `<div class="heat-col" data-heat="${h.id}">
     <div class="heat-header">
       <div class="heat-header-top">
@@ -1729,7 +1759,7 @@ function openVolunteerModal(volunteer){
     <div class="form-row"><label><input type="checkbox" id="f_participating" ${v.participating?'checked':''}> Also participating as an athlete</label></div>
     <div class="form-row" id="f_participantWrap" style="${v.participating?'':'display:none;'}">
       <label>Linked Participant</label>
-      <select id="f_participantId"><option value="">— none —</option>${ev.participants.map(p=>`<option value="${p.id}" ${p.id===v.participantId?'selected':''}>${esc(fullName(p))} (${p.division})</option>`).join("")}</select>
+      <select id="f_participantId"><option value="">— none —</option>${ev.participants.filter(p=>!p.canceled).map(p=>`<option value="${p.id}" ${p.id===v.participantId?'selected':''}>${esc(fullName(p))} (${p.division})</option>`).join("")}</select>
     </div>
     <div class="form-row"><label>Notes</label><textarea id="f_notes" rows="3">${esc(v.notes)}</textarea></div>
     <div class="modal-actions">
@@ -2520,7 +2550,7 @@ function renderCheckInTab(main){
   const ev = curEvent();
   const q = checkInSearch.trim().toLowerCase();
   const heatOf = pid => ev.heats.find(h=>h.participantIds.includes(pid));
-  let list = ev.participants.slice();
+  let list = activeParticipants(ev);
   if(q){
     list = list.filter(p=>
       fullName(p).toLowerCase().includes(q) ||
@@ -2544,19 +2574,20 @@ function renderCheckInTab(main){
     list.sort((a,b)=> fullName(a).localeCompare(fullName(b)));
   }
 
-  const totalCheckedIn = ev.participants.filter(p=>p.checkedIn).length;
-  const pct = ev.participants.length ? Math.round((totalCheckedIn/ev.participants.length)*100) : 0;
+  const activeTotal = activeParticipants(ev).length;
+  const totalCheckedIn = activeParticipants(ev).filter(p=>p.checkedIn).length;
+  const pct = activeTotal ? Math.round((totalCheckedIn/activeTotal)*100) : 0;
   main.innerHTML = `
     <div class="card">
       <div class="section-title"><h2>Check-In</h2>${help("Search a name, tap Check In when they arrive. Doubles/relay teams check in together as one entry. Sort by Heat Time to see who's racing soon, or Arrival to review who just checked in.")}</div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <div style="font-size:15px;">✅ <b>${totalCheckedIn}</b> / ${ev.participants.length} checked in</div>
+        <div style="font-size:15px;">✅ <b>${totalCheckedIn}</b> / ${activeTotal} checked in</div>
         <div style="flex:1;background:var(--bg3);border-radius:6px;height:8px;overflow:hidden;max-width:240px;"><div style="background:var(--green);height:100%;width:${pct}%;"></div></div>
       </div>
       <input id="checkinSearch" placeholder="🔍 Search by name or email…" value="${esc(checkInSearch)}" style="font-size:18px;padding:14px;width:100%;box-sizing:border-box;" autocomplete="off">
       <div class="toolbar" style="margin-top:10px;">
-        <button class="small ${checkInFilters.status==='all'?'primary':''}" data-status="all">All (${ev.participants.length})</button>
-        <button class="small ${checkInFilters.status==='pending'?'primary':''}" data-status="pending">Not Arrived (${ev.participants.length-totalCheckedIn})</button>
+        <button class="small ${checkInFilters.status==='all'?'primary':''}" data-status="all">All (${activeTotal})</button>
+        <button class="small ${checkInFilters.status==='pending'?'primary':''}" data-status="pending">Not Arrived (${activeTotal-totalCheckedIn})</button>
         <button class="small ${checkInFilters.status==='in'?'primary':''}" data-status="in">Arrived (${totalCheckedIn})</button>
         <div class="spacer"></div>
         <select id="checkinDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${checkInFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
@@ -2929,7 +2960,7 @@ function renderParticipantResults(){
   const ev = curEvent();
   const q = (document.getElementById("participantSearchInput").value||"").trim().toLowerCase();
   const div = document.getElementById("participantDivisionFilter").value;
-  let list = ev.participants.slice();
+  let list = activeParticipants(ev);
   if(div) list = list.filter(p=>p.division===div);
   if(q) list = list.filter(p=> fullName(p).toLowerCase().includes(q) || (p.partnerNames||"").toLowerCase().includes(q));
   list.sort((a,b)=> fullName(a).localeCompare(fullName(b)));
