@@ -150,9 +150,10 @@ tr:hover td{background:var(--bg3);}
 .checkin-meta{color:var(--muted);font-size:12px;margin-top:2px;}
 .checkin-btn{padding:10px 16px;font-size:14px;white-space:nowrap;}
 
-.timeline{position:relative;height:60px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);margin-top:8px;overflow:hidden;}
-.timeline .block{position:absolute;top:6px;bottom:6px;border-radius:5px;font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 4px;white-space:nowrap;}
-.timeline .hourmark{position:absolute;top:0;bottom:0;border-left:1px dashed rgba(255,255,255,.15);font-size:9px;color:var(--muted);padding-left:2px;}
+.timeline{position:relative;height:72px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);margin-top:8px;overflow:hidden;}
+.timeline .hourline{position:absolute;top:0;bottom:0;border-left:1px dashed rgba(255,255,255,.15);}
+.timeline .hourlabel{position:absolute;top:2px;font-size:9px;color:var(--muted);padding-left:3px;}
+.timeline .block{position:absolute;top:20px;bottom:6px;border-radius:5px;font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 4px;white-space:nowrap;}
 
 /* Mobile volunteer view */
 #mobileView{max-width:480px;margin:0 auto;}
@@ -699,17 +700,33 @@ function getUnavailability(ev, vol){
 function groupStationRuns(ev, assignments){
   const resolved = assignments
     .map(a=>{ const h = ev.heats.find(x=>x.id===a.heatId); return h ? {station:a.station, timeMin:timeToMin(h.time)} : null; })
-    .filter(Boolean)
-    .sort((a,b)=> a.timeMin-b.timeMin || a.station.localeCompare(b.station));
-  const runs = [];
+    .filter(Boolean);
+  // Group each station's heat times separately before merging consecutive
+  // runs. Doing one combined time+station sort (the old approach) breaks
+  // down when a volunteer covers two stations across the exact same heats
+  // (e.g. Sled Pull AND Sled Push every 10 minutes) — the two stations'
+  // entries interleave in the sorted array, so no two same-station entries
+  // ever end up adjacent and every single heat gets reported as its own
+  // isolated run instead of one merged block per station.
+  const byStation = {};
   resolved.forEach(r=>{
-    const last = runs[runs.length-1];
-    if(last && last.station===r.station && r.timeMin-last.lastTimeMin===ev.heatInterval){
-      last.lastTimeMin = r.timeMin; last.count++;
-    } else {
-      runs.push({station:r.station, firstTimeMin:r.timeMin, lastTimeMin:r.timeMin, count:1});
-    }
+    (byStation[r.station] = byStation[r.station] || []).push(r.timeMin);
   });
+  const runs = [];
+  Object.keys(byStation).forEach(station=>{
+    const times = byStation[station].slice().sort((a,b)=>a-b);
+    times.forEach(timeMin=>{
+      const last = runs[runs.length-1];
+      if(last && last.station===station && timeMin-last.lastTimeMin===ev.heatInterval){
+        last.lastTimeMin = timeMin; last.count++;
+      } else {
+        runs.push({station, firstTimeMin:timeMin, lastTimeMin:timeMin, count:1});
+      }
+    });
+  });
+  // Sort the finished runs chronologically so the UI reads naturally
+  // (station grouping above no longer implies time order).
+  runs.sort((a,b)=> a.firstTimeMin-b.firstTimeMin);
   return runs;
 }
 /* A volunteer's displayed coverage window should never spill past the
@@ -1841,18 +1858,22 @@ function renderVolunteerTimeline(ev, v){
   const blocks = [];
   const unavail = getUnavailability(ev, v);
   if(unavail){
-    blocks.push({start:timeToMin(unavail.start), end:timeToMin(unavail.end), color:"#f85149", label:"Racing/Unavailable"});
+    blocks.push({start:timeToMin(unavail.start), end:timeToMin(unavail.end), color:"#f85149", label:"Racing"});
   }
   groupStationRuns(ev, ev.stationAssignments.filter(a=>a.volunteerId===v.id)).forEach(r=>{
     const end = capRunEndToBlock(r.lastTimeMin, r.lastTimeMin+ev.raceDuration);
     blocks.push({start:r.firstTimeMin, end, color:"#3b9dff", label:r.station});
   });
-  const hourMarks = [];
+  const hourLines = [];
+  const hourLabels = [];
   for(let t=Math.ceil(dayStart/60)*60; t<dayEnd; t+=60){
-    hourMarks.push(`<div class="hourmark" style="left:${((t-dayStart)/span*100)}%">${minToTime(t)}</div>`);
+    const left = ((t-dayStart)/span*100);
+    hourLines.push(`<div class="hourline" style="left:${left}%"></div>`);
+    hourLabels.push(`<div class="hourlabel" style="left:${left}%">${minToTime(t)}</div>`);
   }
   return `<div class="timeline">
-    ${hourMarks.join("")}
+    ${hourLines.join("")}
+    ${hourLabels.join("")}
     ${blocks.map(b=>`<div class="block" style="left:${((b.start-dayStart)/span*100)}%;width:${((b.end-b.start)/span*100)}%;background:${b.color};" title="${esc(b.label)}">${esc(b.label)}</div>`).join("")}
   </div>`;
 }
@@ -2965,21 +2986,16 @@ function renderMobileVolunteerView(main){
     <div id="mobileView">
       <div class="mv-hero"><h2>👋 Hi ${esc(vol.name)}</h2><div class="sub">${esc(ev.name)}</div></div>
 
-      <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">${assignmentLbl}</div>
-        <div class="big">${assignmentParts.length ? assignmentParts.join(", ") : "Not yet assigned"}</div></div></div>
-
       ${vol.participating ? `<div class="mv-block"><div class="icon">🏁</div><div><div class="lbl">Your Race Time</div>
         <div class="big">${unavail?fmt12(unavail.raceTime):"Not yet scheduled"}</div></div></div>` : ""}
 
-      <div class="mv-block"><div class="icon">⏰</div><div><div class="lbl">Arrival Time</div>
-        <div class="big">${fmt12(VOLUNTEER_ARRIVAL_TIME)}</div></div></div>
-
-      ${unavail ? `<div class="mv-block"><div class="icon">🚫</div><div><div class="lbl">Unavailable Window</div>
-        <div class="big">${fmt12(unavail.start)} – ${fmt12(unavail.end)}</div></div></div>
-      <div class="mv-block"><div class="icon">✅</div><div><div class="lbl">Available Again At</div>
-        <div class="big">${fmt12(unavail.end)}</div></div></div>` : ""}
+      <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">${assignmentLbl}</div>
+        <div class="big">${assignmentParts.length ? assignmentParts.join(", ") : "Not yet assigned"}</div></div></div>
 
       ${renderVolunteerTimeline(ev, vol)}
+
+      <div class="mv-block"><div class="icon">⏰</div><div><div class="lbl">Arrival Time</div>
+        <div class="big">${fmt12(VOLUNTEER_ARRIVAL_TIME)}</div></div></div>
 
       ${renderVolunteerBlockOverview(ev)}
 
