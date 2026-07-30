@@ -739,11 +739,22 @@ function capRunEndToBlock(lastTimeMin, rawEnd){
   const block = STATION_BLOCKS.find(b=> lastTimeMin>=timeToMin(b.start) && lastTimeMin<timeToMin(b.end));
   return block ? Math.min(rawEnd, timeToMin(block.end)) : rawEnd;
 }
-function summarizeStationAssignments(ev, assignments){
+// Returns pre-escaped HTML strings (one per run) rather than plain text,
+// since the mobile view needs to color the "with <name>" co-volunteer note
+// -- volId is whoever's view this is being built for, so we can look up
+// anyone ELSE covering the same station during the same heats (the
+// Coverage by Block tool allows up to 2 people per station/block).
+function summarizeStationAssignments(ev, assignments, volId){
   return groupStationRuns(ev, assignments).map(r=>{
-    if(r.count<=1) return `${r.station} @ ${fmt12(minToTime(r.firstTimeMin))}`;
+    const heatIdsInRun = new Set(
+      ev.heats.filter(h=>{ const t=timeToMin(h.time); return t>=r.firstTimeMin && t<=r.lastTimeMin; }).map(h=>h.id)
+    );
+    const co = ev.stationAssignments.find(a=> a.station===r.station && a.volunteerId!==volId && heatIdsInRun.has(a.heatId));
+    const coVol = co ? ev.volunteers.find(v=>v.id===co.volunteerId) : null;
+    const withNote = coVol ? ` <span style="color:var(--orange);">with ${esc(coVol.name)}</span>` : "";
+    if(r.count<=1) return `${esc(r.station)} @ ${fmt12(minToTime(r.firstTimeMin))}${withNote}`;
     const end = capRunEndToBlock(r.lastTimeMin, r.lastTimeMin+ev.raceDuration);
-    return `${r.station} from ${fmt12(minToTime(r.firstTimeMin))} to ${fmt12(minToTime(end))}`;
+    return `${esc(r.station)} from ${fmt12(minToTime(r.firstTimeMin))} to ${fmt12(minToTime(end))}${withNote}`;
   });
 }
 function timeOverlaps(t, start, end){
@@ -2972,14 +2983,14 @@ function renderMobileVolunteerView(main){
   if(!vol){ main.innerHTML = `<div class="card">Volunteer not found for this event. <button onclick="logout()">Switch user</button></div>`; return; }
   const unavail = getUnavailability(ev, vol);
   const assignments = ev.stationAssignments.filter(a=>a.volunteerId===vol.id);
-  const stationSummaries = assignments.length ? summarizeStationAssignments(ev, assignments) : [];
+  const stationSummaries = assignments.length ? summarizeStationAssignments(ev, assignments, vol.id) : [];
   // Whole-event roles (Front Desk, Heat Starter) live in ev.roleAssignments,
   // separate from per-heat stationAssignments — without this, someone
   // holding only a role (no per-heat station) would wrongly see "Not yet
   // assigned" even though they're fully scheduled for the day.
   const roleAssignment = (ev.roleAssignments||[]).find(a=>a.volunteerId===vol.id);
   const assignmentParts = [];
-  if(roleAssignment) assignmentParts.push(roleAssignment.role);
+  if(roleAssignment) assignmentParts.push(esc(roleAssignment.role));
   assignmentParts.push(...stationSummaries);
   const assignmentLbl = assignmentParts.length>1 ? "Your Assignments" : (roleAssignment && !stationSummaries.length ? "Your Role" : "Assigned Station");
   main.innerHTML = `
@@ -2990,7 +3001,7 @@ function renderMobileVolunteerView(main){
         <div class="big">${unavail?fmt12(unavail.raceTime):"Not yet scheduled"}</div></div></div>` : ""}
 
       <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">${assignmentLbl}</div>
-        <div class="big">${assignmentParts.length ? assignmentParts.join(", ") : "Not yet assigned"}</div></div></div>
+        <div class="big">${assignmentParts.length ? assignmentParts.join("<br>") : "Not yet assigned"}</div></div></div>
 
       ${renderVolunteerTimeline(ev, vol)}
 
