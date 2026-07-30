@@ -742,19 +742,45 @@ function capRunEndToBlock(lastTimeMin, rawEnd){
 // Returns pre-escaped HTML strings (one per run) rather than plain text,
 // since the mobile view needs to color the "with <name>" co-volunteer note
 // -- volId is whoever's view this is being built for, so we can look up
-// anyone ELSE covering the same station during the same heats (the
-// Coverage by Block tool allows up to 2 people per station/block).
+// anyone ELSE covering the same station at the same heats (the Coverage by
+// Block tool allows up to 2 people per station/block).
+//
+// A continuous same-station run (from groupStationRuns) can still have a
+// co-volunteer who only overlaps PART of it -- e.g. Eric covers Sandbag
+// Lunges 10am-2pm straight through, but Judika only joins him for the
+// 10-12 block before moving to Wall Balls. Reporting one "with Judika"
+// note across the whole 10-2 run would wrongly claim she's there the
+// whole time. So within each run we re-split at every point the set of
+// co-volunteers actually changes, and only note a name for the heats
+// they're truly present for.
 function summarizeStationAssignments(ev, assignments, volId){
-  return groupStationRuns(ev, assignments).map(r=>{
-    const heatIdsInRun = new Set(
-      ev.heats.filter(h=>{ const t=timeToMin(h.time); return t>=r.firstTimeMin && t<=r.lastTimeMin; }).map(h=>h.id)
-    );
-    const co = ev.stationAssignments.find(a=> a.station===r.station && a.volunteerId!==volId && heatIdsInRun.has(a.heatId));
-    const coVol = co ? ev.volunteers.find(v=>v.id===co.volunteerId) : null;
-    const withNote = coVol ? `<br><span style="color:var(--orange);">with ${esc(coVol.name)}</span>` : "";
-    if(r.count<=1) return `${esc(r.station)} @ ${fmt12(minToTime(r.firstTimeMin))}${withNote}`;
-    const end = capRunEndToBlock(r.lastTimeMin, r.lastTimeMin+ev.raceDuration);
-    return `${esc(r.station)} from ${fmt12(minToTime(r.firstTimeMin))} to ${fmt12(minToTime(end))}${withNote}`;
+  const segments = [];
+  groupStationRuns(ev, assignments).forEach(r=>{
+    const heatsInRun = ev.heats
+      .filter(h=>{ const t=timeToMin(h.time); return t>=r.firstTimeMin && t<=r.lastTimeMin; })
+      .sort((a,b)=>timeToMin(a.time)-timeToMin(b.time));
+    let seg = null;
+    heatsInRun.forEach(h=>{
+      const t = timeToMin(h.time);
+      const coIds = ev.stationAssignments
+        .filter(a=>a.heatId===h.id && a.station===r.station && a.volunteerId!==volId)
+        .map(a=>a.volunteerId).sort();
+      const key = coIds.join(",");
+      if(seg && seg.key===key){
+        seg.lastTimeMin = t;
+      } else {
+        if(seg) segments.push(seg);
+        seg = {station:r.station, firstTimeMin:t, lastTimeMin:t, key, coIds};
+      }
+    });
+    if(seg) segments.push(seg);
+  });
+  return segments.map(seg=>{
+    const coNames = seg.coIds.map(id=>{ const v=ev.volunteers.find(x=>x.id===id); return v?v.name:"?"; });
+    const withNote = coNames.length ? `<br><span style="color:var(--orange);">with ${esc(coNames.join(" & "))}</span>` : "";
+    if(seg.firstTimeMin===seg.lastTimeMin) return `${esc(seg.station)} @ ${fmt12(minToTime(seg.firstTimeMin))}${withNote}`;
+    const end = capRunEndToBlock(seg.lastTimeMin, seg.lastTimeMin+ev.raceDuration);
+    return `${esc(seg.station)} from ${fmt12(minToTime(seg.firstTimeMin))} to ${fmt12(minToTime(end))}${withNote}`;
   });
 }
 function timeOverlaps(t, start, end){
