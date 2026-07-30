@@ -156,7 +156,7 @@ tr:hover td{background:var(--bg3);}
 .timeline .block{position:absolute;top:20px;bottom:6px;border-radius:5px;font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 4px;white-space:nowrap;}
 
 /* Mobile volunteer view */
-#mobileView{max-width:480px;margin:0 auto;}
+#mobileView{max-width:560px;margin:0 auto;}
 .mv-hero{background:linear-gradient(135deg,var(--accent),#a53a1a);border-radius:16px;padding:22px;margin-bottom:16px;text-align:center;}
 .mv-hero h2{margin:0;font-size:20px;}
 .mv-hero .sub{opacity:.85;font-size:13px;margin-top:4px;}
@@ -751,7 +751,7 @@ function summarizeStationAssignments(ev, assignments, volId){
     );
     const co = ev.stationAssignments.find(a=> a.station===r.station && a.volunteerId!==volId && heatIdsInRun.has(a.heatId));
     const coVol = co ? ev.volunteers.find(v=>v.id===co.volunteerId) : null;
-    const withNote = coVol ? ` <span style="color:var(--orange);">with ${esc(coVol.name)}</span>` : "";
+    const withNote = coVol ? `<br><span style="color:var(--orange);">with ${esc(coVol.name)}</span>` : "";
     if(r.count<=1) return `${esc(r.station)} @ ${fmt12(minToTime(r.firstTimeMin))}${withNote}`;
     const end = capRunEndToBlock(r.lastTimeMin, r.lastTimeMin+ev.raceDuration);
     return `${esc(r.station)} from ${fmt12(minToTime(r.firstTimeMin))} to ${fmt12(minToTime(end))}${withNote}`;
@@ -3003,7 +3003,7 @@ function renderMobileVolunteerView(main){
       <div class="mv-block"><div class="icon">📍</div><div><div class="lbl">${assignmentLbl}</div>
         <div class="big">${assignmentParts.length ? assignmentParts.join("<br>") : "Not yet assigned"}</div></div></div>
 
-      ${renderVolunteerTimeline(ev, vol)}
+      <div style="margin-bottom:14px;">${renderVolunteerTimeline(ev, vol)}</div>
 
       <div class="mv-block"><div class="icon">⏰</div><div><div class="lbl">Arrival Time</div>
         <div class="big">${fmt12(VOLUNTEER_ARRIVAL_TIME)}</div></div></div>
