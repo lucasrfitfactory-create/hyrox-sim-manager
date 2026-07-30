@@ -647,22 +647,23 @@ function validateConstraints(ev){
   activeParticipants(ev).forEach(p=>{
     const h = heatOf(p.id);
     (p.constraints||[]).forEach(c=>{
+      const ckey = "constraint:"+p.id+":"+c.type+":"+(c.time||c.athleteId||"");
       if(c.type==="mustBefore" && c.time){
-        if(!h) { violations.push({level:"red", msg:`${fullName(p)} has a "must race before ${c.time}" constraint but is not scheduled in any heat.`}); }
+        if(!h) { violations.push({key:ckey, level:"red", msg:`${fullName(p)} has a "must race before ${c.time}" constraint but is not scheduled in any heat.`}); }
         else if(timeToMin(h.time) >= timeToMin(c.time)){
-          violations.push({level:"red", msg:`${fullName(p)} must race before ${fmt12(c.time)} but is scheduled at ${fmt12(h.time)}.`});
+          violations.push({key:ckey, level:"red", msg:`${fullName(p)} must race before ${fmt12(c.time)} but is scheduled at ${fmt12(h.time)}.`});
         }
       }
       if(c.type==="cannotBefore" && c.time){
         if(h && timeToMin(h.time) < timeToMin(c.time)){
-          violations.push({level:"red", msg:`${fullName(p)} cannot race before ${fmt12(c.time)} but is scheduled at ${fmt12(h.time)}.`});
+          violations.push({key:ckey, level:"red", msg:`${fullName(p)} cannot race before ${fmt12(c.time)} but is scheduled at ${fmt12(h.time)}.`});
         }
       }
       if(c.type==="afterAthlete" && c.athleteId){
         const ref = ev.participants.find(x=>x.id===c.athleteId);
         const refHeat = ref?heatOf(ref.id):null;
         if(h && refHeat && timeToMin(h.time) <= timeToMin(refHeat.time)){
-          violations.push({level:"orange", msg:`${fullName(p)} should race after ${ref?fullName(ref):"referenced athlete"}, but is not scheduled later.`});
+          violations.push({key:ckey, level:"orange", msg:`${fullName(p)} should race after ${ref?fullName(ref):"referenced athlete"}, but is not scheduled later.`});
         }
       }
     });
@@ -841,33 +842,67 @@ function detectVolunteerConflicts(ev){
     const check = canAssignVolunteer(ev, a.volunteerId, a.heatId, a.station);
     if(check.ok) return;
     if(check.kind==="multiStation"){
-      const key = a.volunteerId+"|multiStation";
+      const key = "conflict:"+a.volunteerId+":multiStation";
       if(!groups[key]){
         const vol = ev.volunteers.find(v=>v.id===a.volunteerId);
-        groups[key] = {level:"orange", kind:"multiStation", volName: vol?vol.name:"Someone", stations:new Set(), count:0};
+        groups[key] = {key, level:"orange", kind:"multiStation", volName: vol?vol.name:"Someone", stations:new Set(), count:0};
       }
       groups[key].stations.add(a.station);
       groups[key].stations.add(check.otherStation);
       groups[key].count++;
     } else {
-      const key = a.volunteerId+"|"+check.kind+"|"+(check.role||"");
-      if(!groups[key]) groups[key] = {level:check.level, kind:check.kind, baseReason:check.reason, count:0};
+      const key = "conflict:"+a.volunteerId+":"+check.kind+":"+(check.role||"");
+      if(!groups[key]) groups[key] = {key, level:check.level, kind:check.kind, baseReason:check.reason, count:0};
       groups[key].count++;
     }
   });
   return Object.values(groups).map(g=>{
     if(g.kind==="multiStation"){
       const stationList = [...g.stations].join(", ");
-      return {level:"orange", kind:"multiStation",
+      return {key:g.key, level:"orange", kind:"multiStation",
         reason: `${g.volName} is covering more than one station at overlapping times: ${stationList}${g.count>1?` (${g.count} heats affected)`:""}.`};
     }
-    return {level:g.level, kind:g.kind, reason: g.count>1 ? `${g.baseReason} (${g.count} heats affected)` : g.baseReason};
+    return {key:g.key, level:g.level, kind:g.kind, reason: g.count>1 ? `${g.baseReason} (${g.count} heats affected)` : g.baseReason};
   });
 }
 function detectMissingVolunteerCoverage(ev){
   const need = ev.heats.length * evStations(ev).length;
   const have = ev.stationAssignments.length;
   return {need, have, missing: Math.max(0, need-have)};
+}
+
+/* =========================================================================
+   ACKNOWLEDGING WARNINGS — click to grey out and sink to the bottom of the
+   list, without making the underlying issue disappear. Every issue type
+   (duplicate, conflict, constraint violation, etc.) is given a stable text
+   key, stored in ev.acknowledgedWarnings, so it survives reloads and is
+   shared between the Dashboard and the Stations tab (both read the same list).
+   ========================================================================= */
+function isAckedWarning(ev, key){ return (ev.acknowledgedWarnings||[]).includes(key); }
+function toggleAckWarning(key){
+  const ev = curEvent();
+  if(!ev.acknowledgedWarnings) ev.acknowledgedWarnings = [];
+  const idx = ev.acknowledgedWarnings.indexOf(key);
+  if(idx>=0) ev.acknowledgedWarnings.splice(idx,1); else ev.acknowledgedWarnings.push(key);
+  saveDB(); renderAll();
+}
+function renderWarnList(ev, items){
+  if(!items.length) return `<div class="warn-item green">🟢 No issues detected.</div>`;
+  const withAck = items.map(it=>({...it, acked:isAckedWarning(ev, it.key)}));
+  // Stable sort: unacknowledged first (in their original order), acknowledged sink to the bottom.
+  withAck.sort((a,b)=> (a.acked===b.acked) ? 0 : (a.acked?1:-1));
+  return withAck.map(it=>{
+    const dot = it.acked ? "⚪" : (it.level==="red"?"🔴":it.level==="orange"?"🟠":"🟢");
+    return `<div class="warn-item ${it.acked?'':it.level}" style="display:flex;align-items:center;gap:10px;${it.acked?'opacity:0.5;filter:grayscale(1);':''}">
+      <span style="flex:1;">${dot} ${esc(it.text)}</span>
+      <button class="small ackWarningBtn" data-key="${esc(it.key)}">${it.acked?'Restore':'✓ Acknowledge'}</button>
+    </div>`;
+  }).join("");
+}
+function wireAckWarningButtons(){
+  document.querySelectorAll(".ackWarningBtn").forEach(b=>{
+    b.addEventListener("click", ()=> toggleAckWarning(b.dataset.key));
+  });
 }
 
 /* =========================================================================
@@ -1033,19 +1068,21 @@ function renderDashboard(main){
         <div class="stat ${statClass(unassigned.length)}"><div class="num">${unassigned.length}</div><div class="label">Unassigned Participants</div></div>
       </div>
       <div class="warn-list">
-        ${dupes.map(p=>`<div class="warn-item red">🔴 Possible duplicate: ${esc(fullName(p))} (${esc(p.email)})</div>`).join("")}
-        ${unassigned.map(p=>`<div class="warn-item red">🔴 ${esc(teamLabel(p))} (${esc(p.division)}) is not assigned to any heat.</div>`).join("")}
-        ${incomplete.map(h=>`<div class="warn-item orange">🟠 ${esc(h.division)} Heat ${h.heatNumberInDivision} at ${fmt12(h.time)} is under capacity (${h.participantIds.length}/${CAPACITY[h.division]}).</div>`).join("")}
-        ${volConflicts.map(c=>`<div class="warn-item ${c.level}">${c.level==='red'?'🔴':'🟠'} ${esc(c.reason)}</div>`).join("")}
-        ${constraintViolations.map(v=>`<div class="warn-item ${v.level}">${v.level==='red'?'🔴':'🟠'} ${esc(v.msg)}</div>`).join("")}
-        ${coverage.missing>0?`<div class="warn-item orange">🟠 ${coverage.missing} of ${coverage.need} station slots are unfilled across all heats.</div>`:""}
-        ${missingRoles.map(r=>`<div class="warn-item orange">🟠 ${esc(r.role)} needs ${r.needed-r.filled} more volunteer(s) (${r.filled}/${r.needed} filled).</div>`).join("")}
-        ${(!dupes.length && !incomplete.length && !volConflicts.length && !constraintViolations.length && !coverage.missing && !missingRoles.length && !unassigned.length) ? `<div class="warn-item green">🟢 No issues detected. Event is fully ready.</div>` : ""}
+        ${renderWarnList(ev, [
+          ...dupes.map(p=>({key:"dup:"+p.id, level:"red", text:`Possible duplicate: ${fullName(p)} (${p.email})`})),
+          ...unassigned.map(p=>({key:"unassigned:"+p.id, level:"red", text:`${teamLabel(p)} (${p.division}) is not assigned to any heat.`})),
+          ...incomplete.map(h=>({key:"incomplete:"+h.id, level:"orange", text:`${h.division} Heat ${h.heatNumberInDivision} at ${fmt12(h.time)} is under capacity (${h.participantIds.length}/${CAPACITY[h.division]}).`})),
+          ...volConflicts.map(cf=>({key:cf.key, level:cf.level, text:cf.reason})),
+          ...constraintViolations.map(v=>({key:v.key, level:v.level, text:v.msg})),
+          ...(coverage.missing>0 ? [{key:"coverage", level:"orange", text:`${coverage.missing} of ${coverage.need} station slots are unfilled across all heats.`}] : []),
+          ...missingRoles.map(r=>({key:"role:"+r.role, level:"orange", text:`${r.role} needs ${r.needed-r.filled} more volunteer(s) (${r.filled}/${r.needed} filled).`}))
+        ])}
       </div>
     </div>
 
     ${DB.role==="admin" ? renderFinancialDashboard(ev) : ""}
   `;
+  wireAckWarningButtons();
   if(DB.role==="admin") wireFinancialDashboard(ev);
 }
 
@@ -1911,9 +1948,11 @@ function renderStationsTab(main){
       </div>
     </div>
     <div class="card">
-      <div class="section-title"><h3>Assign a Volunteer to a Station</h3>${help("The easy way to fill stations: pick a volunteer, a station, and a start/end time — every heat in that window gets them assigned in one click. Defaults to the whole day, so leaving the times alone works exactly like the old \u2018whole day\u2019 button did. If they're busy during part of that window (racing, another station, a whole-event role), you still get assigned and just see a heads-up afterward \u2014 nothing here blocks you, it's your call.")}</div>
+      <div class="section-title"><h3>Assign a Volunteer to a Station</h3>${help("The easy way to fill stations: pick a volunteer, a station, and a start/end time — every heat in that window gets them assigned in one click. Defaults to the whole day, so leaving the times alone works exactly like the old \u2018whole day\u2019 button did. Optionally add a second volunteer to double up the same station for the same window. If they're busy during part of that window (racing, another station, a whole-event role), you still get assigned and just see a heads-up afterward \u2014 nothing here blocks you, it's your call.")}</div>
       <div class="toolbar">
         <select id="sa_volunteer"><option value="">Select volunteer…</option>${ev.volunteers.map(v=>`<option value="${v.id}">${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}</select>
+        <span style="color:var(--muted);">+</span>
+        <select id="sa_volunteer2"><option value="">+ 2nd volunteer (optional)</option>${ev.volunteers.map(v=>`<option value="${v.id}">${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}</select>
         <span style="color:var(--muted);">→</span>
         <select id="sa_station">${stations.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select>
         <span style="color:var(--muted);">from</span>
@@ -1924,7 +1963,7 @@ function renderStationsTab(main){
       </div>
     </div>
     <div class="card table-wrap">
-      <div class="section-title"><h3>Coverage by Block</h3>${help("The whole day organized into four 2-hour blocks, since the same volunteer typically covers a whole block now rather than one heat at a time \u2014 far easier to scan than a row per heat. Pick a volunteer per station per block; it applies to every heat in that block at once, the same as the Assign tool above. \u2018Mixed\u2019 means the heats in that block currently disagree underneath (a leftover from an earlier edit) \u2014 just pick a volunteer here and it overwrites the whole block to match.")}</div>
+      <div class="section-title"><h3>Coverage by Block</h3>${help("The whole day organized into four 2-hour blocks, since the same volunteer typically covers a whole block now rather than one heat at a time \u2014 far easier to scan than a row per heat. Each cell has two dropdowns \u2014 the second is optional, for doubling up a station with two people for the same block. Picking either applies to every heat in that block at once, the same as the Assign tool above. \u2018Mixed\u2019 means the heats in that block currently disagree underneath (a leftover from an earlier edit) \u2014 just pick volunteers here and it overwrites the whole block to match.")}</div>
       <table>
         <tr><th>Station</th>${STATION_BLOCKS.map(b=>`<th>${b.label}</th>`).join("")}</tr>
         ${stations.map(s=>`<tr>
@@ -1932,18 +1971,20 @@ function renderStationsTab(main){
           ${STATION_BLOCKS.map((b,bi)=>{
             const st = blockAssignmentState(ev, s, b);
             const cellStyle = st.state==="empty" ? 'border-color:var(--red);background:var(--red-bg);' : st.state==="mixed" ? 'border-color:var(--orange);background:var(--orange-bg,rgba(210,153,34,0.12));' : '';
-            return `<td><select class="blockStationSelect" data-station="${esc(s)}" data-block="${bi}" style="${cellStyle}">
-              <option value="">— Unassigned —</option>
-              ${st.state==="mixed" ? `<option value="" selected disabled>— Mixed, see grid below —</option>` : ""}
-              ${ev.volunteers.map(v=>`<option value="${v.id}" ${st.state==='uniform'&&st.volunteerId===v.id?'selected':''}>${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}
-            </select></td>`;
+            const vol1 = st.volunteerIds[0] || "";
+            const vol2 = st.volunteerIds[1] || "";
+            const opts = (emptyLabel, selectedId) => `<option value="">${emptyLabel}</option>${st.state==="mixed" ? `<option value="" selected disabled>— Mixed, pick to resolve —</option>` : ""}${ev.volunteers.map(v=>`<option value="${v.id}" ${selectedId===v.id?'selected':''}>${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}`;
+            return `<td style="${cellStyle}">
+              <select class="blockStationSelect" data-station="${esc(s)}" data-block="${bi}" data-slot="0">${opts("— Unassigned —", vol1)}</select>
+              <select class="blockStationSelect" data-station="${esc(s)}" data-block="${bi}" data-slot="1" style="margin-top:4px;">${opts("— No 2nd volunteer —", vol2)}</select>
+            </td>`;
           }).join("")}
         </tr>`).join("")}
       </table>
     </div>
     <div class="card">
-      <div class="section-title"><h3>Volunteer Conflicts</h3>${help("Same list the Dashboard shows, kept here too since this is where you're actually assigning. Orange means allowed but worth knowing \u2014 covering more than one station at once, or a station plus a whole-event role. Red means a real problem: someone scheduled on a station during their own race.")}</div>
-      ${volConflicts.length ? volConflicts.map(cf=>`<div class="warn-item ${cf.level}">${cf.level==='red'?'🔴':'🟠'} ${esc(cf.reason)}</div>`).join("") : `<div class="warn-item green">🟢 No conflicts right now.</div>`}
+      <div class="section-title"><h3>Volunteer Conflicts</h3>${help("Same list the Dashboard shows, kept here too since this is where you're actually assigning. Orange means allowed but worth knowing \u2014 covering more than one station at once, or a station plus a whole-event role. Red means a real problem: someone scheduled on a station during their own race. Acknowledge one once you've seen it \u2014 it greys out and drops to the bottom instead of disappearing.")}</div>
+      ${renderWarnList(ev, volConflicts.map(cf=>({key:cf.key, level:cf.level, text:cf.reason})))}
     </div>
     <div class="card">
       <div class="section-title"><h3>Additional Roles</h3>${help("Shift-based roles that aren't tied to a single heat — Front Desk needs 1 person, Heat Starter needs 1. These cover the whole event. Assigning someone here automatically clears their per-heat station assignments (they can't be in two places at once), and they'll be blocked from being added to any heat station while holding a role.")}</div>
@@ -1990,18 +2031,23 @@ function renderStationsTab(main){
   });
   document.querySelectorAll(".blockStationSelect").forEach(sel=>{
     sel.addEventListener("change", ()=>{
-      setBlockStationAssignment(sel.dataset.station, Number(sel.dataset.block), sel.value);
+      const cell = sel.closest("td");
+      const vals = Array.from(cell.querySelectorAll(".blockStationSelect")).map(s=>s.value);
+      setBlockStationAssignment(sel.dataset.station, Number(sel.dataset.block), vals);
     });
   });
+  wireAckWarningButtons();
   document.getElementById("btnAssignRange").addEventListener("click", ()=>{
     const volId = document.getElementById("sa_volunteer").value;
+    const volId2 = document.getElementById("sa_volunteer2").value;
     const station = document.getElementById("sa_station").value;
     const start = document.getElementById("sa_start").value;
     const end = document.getElementById("sa_end").value;
     if(!volId){ alert("Pick a volunteer first."); return; }
+    if(volId2 && volId2===volId){ alert("Pick two different volunteers, or leave the second one blank."); return; }
     if(!ev.heats.length){ alert("Generate the heat schedule first."); return; }
     if(!start || !end || timeToMin(end)<=timeToMin(start)){ alert("End time must be after start time."); return; }
-    assignVolunteerRange(ev, volId, station, start, end);
+    assignVolunteerRange(ev, [volId, volId2], station, start, end);
   });
 }
 /* The simple, primary way to fill stations: pick a volunteer, a station, and
@@ -2010,23 +2056,29 @@ function renderStationsTab(main){
    at an overlapping time, a whole-event role) are never blocking here —
    Lucas wants "a simple warning but not blocking" so the assignment always
    goes through and a heads-up is shown afterward if anything overlaps. */
-function assignVolunteerRange(ev, volId, station, startTime, endTime){
-  const vol = ev.volunteers.find(v=>v.id===volId);
-  if(!vol) return;
+function assignVolunteerRange(ev, volIds, station, startTime, endTime){
+  const ids = (Array.isArray(volIds) ? volIds : [volIds]).filter(Boolean);
+  if(!ids.length) return;
+  const names = ids.map(id=>{ const v=ev.volunteers.find(x=>x.id===id); return v?v.name:"Someone"; }).join(" & ");
   const startMin = timeToMin(startTime), endMin = timeToMin(endTime);
   const targetHeats = ev.heats.filter(h=>{ const t=timeToMin(h.time); return t>=startMin && t<endMin; });
   if(!targetHeats.length){ alert("No heats fall within that time range."); return; }
   pushUndo();
   let conflicts = 0;
+  const heatIds = new Set(targetHeats.map(h=>h.id));
+  // Two people can now share the same station/time on purpose — clear whoever
+  // was there before, then write back exactly the 1-2 people chosen.
+  ev.stationAssignments = ev.stationAssignments.filter(a=> !(a.station===station && heatIds.has(a.heatId)));
   targetHeats.forEach(h=>{
-    const check = canAssignVolunteer(ev, volId, h.id, station);
-    if(!check.ok) conflicts++;
-    let a = ev.stationAssignments.find(x=>x.heatId===h.id && x.station===station);
-    if(a){ a.volunteerId = volId; } else { ev.stationAssignments.push({id:uid(), heatId:h.id, station, volunteerId:volId}); }
+    ids.forEach(volId=>{
+      const check = canAssignVolunteer(ev, volId, h.id, station);
+      if(!check.ok) conflicts++;
+      ev.stationAssignments.push({id:uid(), heatId:h.id, station, volunteerId:volId});
+    });
   });
   saveDB(); renderAll();
-  let msg = `${vol.name} assigned to ${station} from ${fmt12(startTime)} to ${fmt12(endTime)} (${targetHeats.length} heat${targetHeats.length!==1?'s':''}).`;
-  if(conflicts) msg += `\n\n⚠️ Heads up: ${conflicts} of those heats overlap with something else for ${vol.name} (their own race, another station, or a whole-event role). Assigned anyway — just double-check their schedule looks right.`;
+  let msg = `${names} assigned to ${station} from ${fmt12(startTime)} to ${fmt12(endTime)} (${targetHeats.length} heat${targetHeats.length!==1?'s':''}).`;
+  if(conflicts) msg += `\n\n⚠️ Heads up: ${conflicts} of those heats overlap with something else (their own race, another station, or a whole-event role). Assigned anyway — just double-check the schedule looks right.`;
   alert(msg);
 }
 function removeStation(name){
@@ -2082,30 +2134,31 @@ function sanitizeRoleAssignments(ev){
 function blockAssignmentState(ev, station, block){
   const startMin = timeToMin(block.start), endMin = timeToMin(block.end);
   const heatsInBlock = ev.heats.filter(h=>{ const t=timeToMin(h.time); return t>=startMin && t<endMin; });
-  if(!heatsInBlock.length) return {state:"none", volunteerId:null};
-  const volIds = new Set(heatsInBlock.map(h=>{
-    const a = ev.stationAssignments.find(x=>x.heatId===h.id && x.station===station);
-    return a ? a.volunteerId : null;
-  }));
-  if(volIds.size===1){
-    const only = [...volIds][0];
-    return only ? {state:"uniform", volunteerId:only} : {state:"empty", volunteerId:null};
+  if(!heatsInBlock.length) return {state:"none", volunteerIds:[]};
+  const setsPerHeat = heatsInBlock.map(h=>
+    ev.stationAssignments.filter(a=>a.heatId===h.id && a.station===station).map(a=>a.volunteerId).sort().join(",")
+  );
+  const uniqueSets = new Set(setsPerHeat);
+  if(uniqueSets.size===1){
+    const only = [...uniqueSets][0];
+    const ids = only ? only.split(",") : [];
+    return {state: ids.length ? "uniform" : "empty", volunteerIds: ids};
   }
-  return {state:"mixed", volunteerId:null};
+  return {state:"mixed", volunteerIds:[]};
 }
-function setBlockStationAssignment(station, blockIdx, volId){
+function setBlockStationAssignment(station, blockIdx, volIds){
   const ev = curEvent();
   const block = STATION_BLOCKS[blockIdx];
   const startMin = timeToMin(block.start), endMin = timeToMin(block.end);
   const heatsInBlock = ev.heats.filter(h=>{ const t=timeToMin(h.time); return t>=startMin && t<endMin; });
   if(!heatsInBlock.length) return;
+  const ids = (volIds||[]).filter(Boolean);
   pushUndo();
-  if(!volId){
-    ev.stationAssignments = ev.stationAssignments.filter(a=> !(a.station===station && heatsInBlock.some(h=>h.id===a.heatId)));
-  } else {
+  const heatIdSet = new Set(heatsInBlock.map(h=>h.id));
+  ev.stationAssignments = ev.stationAssignments.filter(a=> !(a.station===station && heatIdSet.has(a.heatId)));
+  if(ids.length){
     heatsInBlock.forEach(h=>{
-      let a = ev.stationAssignments.find(x=>x.heatId===h.id && x.station===station);
-      if(a){ a.volunteerId = volId; } else { ev.stationAssignments.push({id:uid(), heatId:h.id, station, volunteerId:volId}); }
+      ids.forEach(volId=> ev.stationAssignments.push({id:uid(), heatId:h.id, station, volunteerId:volId}));
     });
   }
   saveDB(); renderAll();
