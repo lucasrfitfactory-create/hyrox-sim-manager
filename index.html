@@ -723,16 +723,22 @@ function timeOverlaps(t, start, end){
 }
 function canAssignVolunteer(ev, volId, heatId, targetStation){
   const vol = ev.volunteers.find(v=>v.id===volId);
-  if(!vol) return {ok:false, reason:"Volunteer not found."};
+  if(!vol) return {ok:false, level:"red", kind:"missing", reason:"Volunteer not found."};
   const heat = ev.heats.find(h=>h.id===heatId);
   if(!heat) return {ok:true};
   const unavail = getUnavailability(ev, vol);
   if(unavail && timeOverlaps(heat.time, unavail.start, unavail.end)){
-    return {ok:false, reason: `${vol.name} is racing at ${fmt12(unavail.raceTime)} and unavailable from ${fmt12(unavail.start)} to ${fmt12(unavail.end)}. Cannot assign to a station during this window.`};
+    // Red: a genuine problem — they physically can't be racing and manning a
+    // station at the same time.
+    return {ok:false, level:"red", kind:"racing",
+      reason: `${vol.name} is scheduled on a station while they're racing (at ${fmt12(unavail.raceTime)}, unavailable ${fmt12(unavail.start)}–${fmt12(unavail.end)}).`};
   }
   const heldRole = (ev.roleAssignments||[]).find(a=>a.volunteerId===volId);
   if(heldRole){
-    return {ok:false, reason: `${vol.name} is assigned to ${heldRole.role} for the whole event and can't also work a per-heat station at the same time.`};
+    // Orange: allowed, just a heads-up — Lucas may genuinely want someone
+    // covering a whole-event role and a station slot.
+    return {ok:false, level:"orange", kind:"role", role:heldRole.role,
+      reason: `${vol.name} is on ${heldRole.role} for the whole event and is also assigned to a per-heat station.`};
   }
   const heatStart = timeToMin(heat.time), heatEnd = heatStart + ev.raceDuration;
   const overlapping = ev.stationAssignments.find(a=>{
@@ -745,8 +751,10 @@ function canAssignVolunteer(ev, volId, heatId, targetStation){
     return heatStart < oe && os < heatEnd;
   });
   if(overlapping){
-    const oh = ev.heats.find(h=>h.id===overlapping.heatId);
-    return {ok:false, reason: `${vol.name} is already assigned to ${overlapping.station} for ${oh.division} Heat ${oh.heatNumberInDivision} at ${fmt12(oh.time)}, which overlaps this heat's time window. Nobody can cover two different stations at once.`};
+    // Orange: allowed, just a heads-up — covering two stations at once is a
+    // deliberate option now, not an error.
+    return {ok:false, level:"orange", kind:"multiStation", otherStation:overlapping.station,
+      reason: `${vol.name} is covering more than one station at overlapping times (${targetStation||"this station"} and ${overlapping.station}).`};
   }
   return {ok:true};
 }
@@ -824,12 +832,37 @@ function detectIncompleteHeats(ev){
   return ev.heats.filter(h=> h.participantIds.length < CAPACITY[h.division]);
 }
 function detectVolunteerConflicts(ev){
-  const conflicts = [];
+  // multiStation is grouped per-volunteer only (collecting every station
+  // involved into one set) rather than per station-pair, since each
+  // overlapping heat otherwise reports itself from both stations'
+  // perspectives — two symmetric lines for the same real conflict.
+  const groups = {};
   ev.stationAssignments.forEach(a=>{
     const check = canAssignVolunteer(ev, a.volunteerId, a.heatId, a.station);
-    if(!check.ok) conflicts.push({assignment:a, reason:check.reason});
+    if(check.ok) return;
+    if(check.kind==="multiStation"){
+      const key = a.volunteerId+"|multiStation";
+      if(!groups[key]){
+        const vol = ev.volunteers.find(v=>v.id===a.volunteerId);
+        groups[key] = {level:"orange", kind:"multiStation", volName: vol?vol.name:"Someone", stations:new Set(), count:0};
+      }
+      groups[key].stations.add(a.station);
+      groups[key].stations.add(check.otherStation);
+      groups[key].count++;
+    } else {
+      const key = a.volunteerId+"|"+check.kind+"|"+(check.role||"");
+      if(!groups[key]) groups[key] = {level:check.level, kind:check.kind, baseReason:check.reason, count:0};
+      groups[key].count++;
+    }
   });
-  return conflicts;
+  return Object.values(groups).map(g=>{
+    if(g.kind==="multiStation"){
+      const stationList = [...g.stations].join(", ");
+      return {level:"orange", kind:"multiStation",
+        reason: `${g.volName} is covering more than one station at overlapping times: ${stationList}${g.count>1?` (${g.count} heats affected)`:""}.`};
+    }
+    return {level:g.level, kind:g.kind, reason: g.count>1 ? `${g.baseReason} (${g.count} heats affected)` : g.baseReason};
+  });
 }
 function detectMissingVolunteerCoverage(ev){
   const need = ev.heats.length * evStations(ev).length;
@@ -995,7 +1028,7 @@ function renderDashboard(main){
       <div class="grid cols-4" style="margin-bottom:14px;">
         <div class="stat ${statClass(dupes.length)}"><div class="num">${dupes.length}</div><div class="label">Duplicate Participants</div></div>
         <div class="stat ${statClass(incomplete.length)}"><div class="num">${incomplete.length}</div><div class="label">Incomplete Heats</div></div>
-        <div class="stat ${statClass(volConflicts.length)}"><div class="num">${volConflicts.length}</div><div class="label">Volunteer Conflicts</div></div>
+        <div class="stat ${volConflicts.some(c=>c.level==='red')?'red':volConflicts.length?'orange':'green'}"><div class="num">${volConflicts.length}</div><div class="label">Volunteer Conflicts</div></div>
         <div class="stat ${statClass(constraintViolations.length)}"><div class="num">${constraintViolations.length}</div><div class="label">Constraint Violations</div></div>
         <div class="stat ${statClass(unassigned.length)}"><div class="num">${unassigned.length}</div><div class="label">Unassigned Participants</div></div>
       </div>
@@ -1003,7 +1036,7 @@ function renderDashboard(main){
         ${dupes.map(p=>`<div class="warn-item red">🔴 Possible duplicate: ${esc(fullName(p))} (${esc(p.email)})</div>`).join("")}
         ${unassigned.map(p=>`<div class="warn-item red">🔴 ${esc(teamLabel(p))} (${esc(p.division)}) is not assigned to any heat.</div>`).join("")}
         ${incomplete.map(h=>`<div class="warn-item orange">🟠 ${esc(h.division)} Heat ${h.heatNumberInDivision} at ${fmt12(h.time)} is under capacity (${h.participantIds.length}/${CAPACITY[h.division]}).</div>`).join("")}
-        ${volConflicts.map(c=>`<div class="warn-item red">🔴 ${esc(c.reason)}</div>`).join("")}
+        ${volConflicts.map(c=>`<div class="warn-item ${c.level}">${c.level==='red'?'🔴':'🟠'} ${esc(c.reason)}</div>`).join("")}
         ${constraintViolations.map(v=>`<div class="warn-item ${v.level}">${v.level==='red'?'🔴':'🟠'} ${esc(v.msg)}</div>`).join("")}
         ${coverage.missing>0?`<div class="warn-item orange">🟠 ${coverage.missing} of ${coverage.need} station slots are unfilled across all heats.</div>`:""}
         ${missingRoles.map(r=>`<div class="warn-item orange">🟠 ${esc(r.role)} needs ${r.needed-r.filled} more volunteer(s) (${r.filled}/${r.needed} filled).</div>`).join("")}
@@ -1850,7 +1883,6 @@ function clearVolunteerAssignments(volId){
 /* =========================================================================
    STATIONS TAB — manage the station list + manual assignment / coverage grid
    ========================================================================= */
-let stationsTabFilters = {division:"", onlyGaps:false};
 function volunteerOptionLabel(ev, v){
   const role = (ev.roleAssignments||[]).find(a=>a.volunteerId===v.id);
   return role ? `${v.name} (${role.role})` : v.name;
@@ -1863,13 +1895,11 @@ function renderStationsTab(main){
   const saDefaultRange = heatTimeMins.length
     ? { start: minToTime(Math.min(...heatTimeMins)), end: minToTime(Math.max(...heatTimeMins)+ev.raceDuration) }
     : { start: ev.startTime, end: ev.startTime };
-  let heats = ev.heats.slice();
-  if(stationsTabFilters.division) heats = heats.filter(h=>h.division===stationsTabFilters.division);
-  if(stationsTabFilters.onlyGaps) heats = heats.filter(h=> stations.some(s=> !ev.stationAssignments.some(a=>a.heatId===h.id && a.station===s)));
+  const volConflicts = detectVolunteerConflicts(ev);
 
   main.innerHTML = `
     <div class="card">
-      <div class="section-title"><h2>Stations</h2>${help("Manage which stations exist for this event. Use \u2018Assign a Volunteer to a Station\u2019 below to fill things quickly, or the heat-by-heat grid further down for fine-tuning. Red cells mean nobody is covering that station yet. Conflicts (racing, a whole-event role, already covering something else at an overlapping time) are never blocked \u2014 you get a heads-up after assigning, but it's always your call.")}</div>
+      <div class="section-title"><h2>Stations</h2>${help("Manage which stations exist for this event, then assign volunteers by 2-hour block below. Red cells mean nobody is covering that station yet. Conflicts (racing, a whole-event role, already covering something else at an overlapping time) are never blocked \u2014 you get a heads-up after assigning, and a running list further down, but it's always your call.")}</div>
       <div class="toolbar">
         <input id="newStationName" placeholder="New station name" style="max-width:220px;">
         <button class="primary" id="btnAddStation">+ Add Station</button>
@@ -1894,7 +1924,7 @@ function renderStationsTab(main){
       </div>
     </div>
     <div class="card table-wrap">
-      <div class="section-title"><h3>Coverage by Block</h3>${help("The whole day organized into four 2-hour blocks, since the same volunteer typically covers a whole block now rather than one heat at a time \u2014 far easier to scan than a row per heat. Pick a volunteer per station per block; it applies to every heat in that block at once, the same as the Assign tool above. \u2018Mixed\u2019 means the heats in that block currently have different volunteers (or gaps) underneath \u2014 use the heat-by-heat grid below to sort those out.")}</div>
+      <div class="section-title"><h3>Coverage by Block</h3>${help("The whole day organized into four 2-hour blocks, since the same volunteer typically covers a whole block now rather than one heat at a time \u2014 far easier to scan than a row per heat. Pick a volunteer per station per block; it applies to every heat in that block at once, the same as the Assign tool above. \u2018Mixed\u2019 means the heats in that block currently disagree underneath (a leftover from an earlier edit) \u2014 just pick a volunteer here and it overwrites the whole block to match.")}</div>
       <table>
         <tr><th>Station</th>${STATION_BLOCKS.map(b=>`<th>${b.label}</th>`).join("")}</tr>
         ${stations.map(s=>`<tr>
@@ -1911,26 +1941,9 @@ function renderStationsTab(main){
         </tr>`).join("")}
       </table>
     </div>
-    <div class="card table-wrap">
-      <div class="section-title"><h3>Coverage by Heat</h3>${help("One row per heat, one column per station, for fine-tuning individual slots — use \u2018Assign a Volunteer to a Station\u2019 above for filling things quickly across a whole time block instead. Pick a volunteer from each dropdown to assign them manually. Choosing '— Unassigned —' clears that slot. Use the filters below if the full grid is too much at once.")}</div>
-      <div class="toolbar">
-        <select id="stationsFilterDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${stationsTabFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><input type="checkbox" id="onlyGapsToggle" ${stationsTabFilters.onlyGaps?'checked':''}> Show only heats with gaps</label>
-      </div>
-      <table>
-        <tr><th>Time</th><th>Heat</th>${stations.map(s=>`<th>${esc(s)}</th>`).join("")}</tr>
-        ${!heats.length ? `<tr><td colspan="${2+stations.length}" style="color:var(--muted);">${ev.heats.length ? "No heats match this filter." : "No heats generated yet — go to Heat Generator first."}</td></tr>` : heats.map(h=>`<tr>
-          <td>${fmt12(h.time)}</td>
-          <td>${esc(h.division)} · ${h.heatNumberInDivision}</td>
-          ${stations.map(s=>{
-            const a = ev.stationAssignments.find(x=>x.heatId===h.id && x.station===s);
-            return `<td><select class="stationSelect" data-heat="${h.id}" data-station="${esc(s)}" style="${a?'':'border-color:var(--red);background:var(--red-bg);'}">
-              <option value="">— Unassigned —</option>
-              ${ev.volunteers.map(v=>`<option value="${v.id}" ${a&&a.volunteerId===v.id?'selected':''}>${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}
-            </select></td>`;
-          }).join("")}
-        </tr>`).join("")}
-      </table>
+    <div class="card">
+      <div class="section-title"><h3>Volunteer Conflicts</h3>${help("Same list the Dashboard shows, kept here too since this is where you're actually assigning. Orange means allowed but worth knowing \u2014 covering more than one station at once, or a station plus a whole-event role. Red means a real problem: someone scheduled on a station during their own race.")}</div>
+      ${volConflicts.length ? volConflicts.map(cf=>`<div class="warn-item ${cf.level}">${cf.level==='red'?'🔴':'🟠'} ${esc(cf.reason)}</div>`).join("") : `<div class="warn-item green">🟢 No conflicts right now.</div>`}
     </div>
     <div class="card">
       <div class="section-title"><h3>Additional Roles</h3>${help("Shift-based roles that aren't tied to a single heat — Front Desk needs 1 person, Heat Starter needs 1. These cover the whole event. Assigning someone here automatically clears their per-heat station assignments (they can't be in two places at once), and they'll be blocked from being added to any heat station while holding a role.")}</div>
@@ -1972,21 +1985,8 @@ function renderStationsTab(main){
     ev.roleAssignments = [];
     saveDB(); renderAll();
   });
-  document.getElementById("stationsFilterDivision").addEventListener("change", (e)=>{
-    stationsTabFilters.division = e.target.value;
-    renderAll();
-  });
-  document.getElementById("onlyGapsToggle").addEventListener("change", (e)=>{
-    stationsTabFilters.onlyGaps = e.target.checked;
-    renderAll();
-  });
   document.querySelectorAll(".removeStationBtn").forEach(b=>{
     b.addEventListener("click", ()=> removeStation(b.dataset.station));
-  });
-  document.querySelectorAll(".stationSelect").forEach(sel=>{
-    sel.addEventListener("change", ()=>{
-      manualAssignStation(sel.dataset.heat, sel.dataset.station, sel.value);
-    });
   });
   document.querySelectorAll(".blockStationSelect").forEach(sel=>{
     sel.addEventListener("change", ()=>{
@@ -2036,17 +2036,6 @@ function removeStation(name){
   ev.stations = evStations(ev).filter(s=>s!==name);
   ev.stationAssignments = ev.stationAssignments.filter(a=>a.station!==name);
   saveDB(); renderAll();
-}
-function manualAssignStation(heatId, station, volId){
-  const ev = curEvent();
-  if(!volId){
-    pushUndo();
-    ev.stationAssignments = ev.stationAssignments.filter(a=>!(a.heatId===heatId && a.station===station));
-    saveDB(); renderAll();
-    return;
-  }
-  assignStation(ev, heatId, station, volId);
-  renderAll();
 }
 function assignRoleSlot(role, slotIndex, volId){
   const ev = curEvent();
