@@ -742,15 +742,23 @@ function canAssignVolunteer(ev, volId, heatId, targetStation){
   return {ok:true};
 }
 function assignStation(ev, heatId, station, volId){
+  // Informational only — conflicts (racing, a whole-event role, double-booked at
+  // another station) no longer block the assignment, they just surface as a
+  // heads-up after saving. Lucas asked for "a simple warning but not blocking."
   const check = canAssignVolunteer(ev, volId, heatId, station);
-  if(!check.ok){ alert("⚠️ Assignment blocked:\n\n"+check.reason); return false; }
-  // ensure volunteer isn't already assigned to a different station in this same heat
   const dupe = ev.stationAssignments.find(a=>a.heatId===heatId && a.volunteerId===volId && a.station!==station);
-  if(dupe){ alert("⚠️ "+ev.volunteers.find(v=>v.id===volId).name+" is already assigned to "+dupe.station+" for this heat."); return false; }
   pushUndo();
   let a = ev.stationAssignments.find(x=>x.heatId===heatId && x.station===station);
   if(a){ a.volunteerId = volId; } else { ev.stationAssignments.push({id:uid(), heatId, station, volunteerId:volId}); }
-  saveDB(); return true;
+  saveDB();
+  if(!check.ok || dupe){
+    const vol = ev.volunteers.find(v=>v.id===volId);
+    let warn = `⚠️ Heads up about this assignment for ${vol?vol.name:"this volunteer"}:\n`;
+    if(!check.ok) warn += `- ${check.reason}\n`;
+    if(dupe) warn += `- Already assigned to ${dupe.station} for this same heat — now covering two stations at once.\n`;
+    alert(warn);
+  }
+  return true;
 }
 function autoAssignStations(ev){
   pushUndo();
@@ -1841,13 +1849,17 @@ function volunteerOptionLabel(ev, v){
 function renderStationsTab(main){
   const ev = curEvent();
   const stations = evStations(ev);
+  const heatTimeMins = ev.heats.map(h=>timeToMin(h.time));
+  const saDefaultRange = heatTimeMins.length
+    ? { start: minToTime(Math.min(...heatTimeMins)), end: minToTime(Math.max(...heatTimeMins)+ev.raceDuration) }
+    : { start: ev.startTime, end: ev.startTime };
   let heats = ev.heats.slice();
   if(stationsTabFilters.division) heats = heats.filter(h=>h.division===stationsTabFilters.division);
   if(stationsTabFilters.onlyGaps) heats = heats.filter(h=> stations.some(s=> !ev.stationAssignments.some(a=>a.heatId===h.id && a.station===s)));
 
   main.innerHTML = `
     <div class="card">
-      <div class="section-title"><h2>Stations</h2>${help("Manage which stations exist for this event, then use the grid below to manually assign or reassign volunteers per heat. Red cells mean nobody is covering that station yet — the system blocks assigning a volunteer who's racing, already on a whole-event role, or already covering an overlapping heat elsewhere, and always tells you why.")}</div>
+      <div class="section-title"><h2>Stations</h2>${help("Manage which stations exist for this event. Use \u2018Assign a Volunteer to a Station\u2019 below to fill things quickly, or the heat-by-heat grid further down for fine-tuning. Red cells mean nobody is covering that station yet. Conflicts (racing, a whole-event role, already covering something else at an overlapping time) are never blocked \u2014 you get a heads-up after assigning, but it's always your call.")}</div>
       <div class="toolbar">
         <input id="newStationName" placeholder="New station name" style="max-width:220px;">
         <button class="primary" id="btnAddStation">+ Add Station</button>
@@ -1859,16 +1871,20 @@ function renderStationsTab(main){
       </div>
     </div>
     <div class="card">
-      <div class="section-title"><h3>Assign Whole Day</h3>${help("Instead of setting a station heat-by-heat, put someone on a station for every heat in one click. If they're also racing, the heats overlapping their own race window are automatically skipped — everything else gets filled.")}</div>
+      <div class="section-title"><h3>Assign a Volunteer to a Station</h3>${help("The easy way to fill stations: pick a volunteer, a station, and a start/end time — every heat in that window gets them assigned in one click. Defaults to the whole day, so leaving the times alone works exactly like the old \u2018whole day\u2019 button did. If they're busy during part of that window (racing, another station, a whole-event role), you still get assigned and just see a heads-up afterward \u2014 nothing here blocks you, it's your call.")}</div>
       <div class="toolbar">
-        <select id="wd_volunteer"><option value="">Select volunteer…</option>${ev.volunteers.map(v=>`<option value="${v.id}">${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}</select>
+        <select id="sa_volunteer"><option value="">Select volunteer…</option>${ev.volunteers.map(v=>`<option value="${v.id}">${esc(volunteerOptionLabel(ev,v))}</option>`).join("")}</select>
         <span style="color:var(--muted);">→</span>
-        <select id="wd_station">${stations.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select>
-        <button class="primary" id="btnAssignWholeDay">Assign for Whole Day</button>
+        <select id="sa_station">${stations.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select>
+        <span style="color:var(--muted);">from</span>
+        <input id="sa_start" type="time" value="${saDefaultRange.start}">
+        <span style="color:var(--muted);">to</span>
+        <input id="sa_end" type="time" value="${saDefaultRange.end}">
+        <button class="primary" id="btnAssignRange">Assign</button>
       </div>
     </div>
     <div class="card table-wrap">
-      <div class="section-title"><h3>Coverage by Heat</h3>${help("One row per heat, one column per station. Pick a volunteer from each dropdown to assign them manually. Choosing '— Unassigned —' clears that slot. Use the filters below if the full grid is too much at once.")}</div>
+      <div class="section-title"><h3>Coverage by Heat</h3>${help("One row per heat, one column per station, for fine-tuning individual slots — use \u2018Assign a Volunteer to a Station\u2019 above for filling things quickly across a whole time block instead. Pick a volunteer from each dropdown to assign them manually. Choosing '— Unassigned —' clears that slot. Use the filters below if the full grid is too much at once.")}</div>
       <div class="toolbar">
         <select id="stationsFilterDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${stationsTabFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><input type="checkbox" id="onlyGapsToggle" ${stationsTabFilters.onlyGaps?'checked':''}> Show only heats with gaps</label>
@@ -1944,33 +1960,40 @@ function renderStationsTab(main){
       manualAssignStation(sel.dataset.heat, sel.dataset.station, sel.value);
     });
   });
-  document.getElementById("btnAssignWholeDay").addEventListener("click", ()=>{
-    const volId = document.getElementById("wd_volunteer").value;
-    const station = document.getElementById("wd_station").value;
+  document.getElementById("btnAssignRange").addEventListener("click", ()=>{
+    const volId = document.getElementById("sa_volunteer").value;
+    const station = document.getElementById("sa_station").value;
+    const start = document.getElementById("sa_start").value;
+    const end = document.getElementById("sa_end").value;
     if(!volId){ alert("Pick a volunteer first."); return; }
     if(!ev.heats.length){ alert("Generate the heat schedule first."); return; }
-    assignVolunteerWholeDay(ev, volId, station);
+    if(!start || !end || timeToMin(end)<=timeToMin(start)){ alert("End time must be after start time."); return; }
+    assignVolunteerRange(ev, volId, station, start, end);
   });
 }
-function assignVolunteerWholeDay(ev, volId, station){
+/* The simple, primary way to fill stations: pick a volunteer, a station, and
+   a start/end time, and every heat whose start time falls in that window
+   gets assigned to them at that station. Conflicts (racing, another station
+   at an overlapping time, a whole-event role) are never blocking here —
+   Lucas wants "a simple warning but not blocking" so the assignment always
+   goes through and a heads-up is shown afterward if anything overlaps. */
+function assignVolunteerRange(ev, volId, station, startTime, endTime){
   const vol = ev.volunteers.find(v=>v.id===volId);
+  if(!vol) return;
+  const startMin = timeToMin(startTime), endMin = timeToMin(endTime);
+  const targetHeats = ev.heats.filter(h=>{ const t=timeToMin(h.time); return t>=startMin && t<endMin; });
+  if(!targetHeats.length){ alert("No heats fall within that time range."); return; }
   pushUndo();
-  let assigned = 0, skippedRacing = 0, skippedOther = 0;
-  ev.heats.forEach(h=>{
+  let conflicts = 0;
+  targetHeats.forEach(h=>{
     const check = canAssignVolunteer(ev, volId, h.id, station);
-    if(!check.ok){
-      if(check.reason && check.reason.toLowerCase().includes("racing")) skippedRacing++;
-      else skippedOther++;
-      return;
-    }
+    if(!check.ok) conflicts++;
     let a = ev.stationAssignments.find(x=>x.heatId===h.id && x.station===station);
     if(a){ a.volunteerId = volId; } else { ev.stationAssignments.push({id:uid(), heatId:h.id, station, volunteerId:volId}); }
-    assigned++;
   });
   saveDB(); renderAll();
-  let msg = `${vol.name} assigned to ${station} for ${assigned} of ${ev.heats.length} heats.`;
-  if(skippedRacing) msg += ` Skipped ${skippedRacing} during their own race window.`;
-  if(skippedOther) msg += ` Skipped ${skippedOther} due to a conflicting role or assignment elsewhere.`;
+  let msg = `${vol.name} assigned to ${station} from ${fmt12(startTime)} to ${fmt12(endTime)} (${targetHeats.length} heat${targetHeats.length!==1?'s':''}).`;
+  if(conflicts) msg += `\n\n⚠️ Heads up: ${conflicts} of those heats overlap with something else for ${vol.name} (their own race, another station, or a whole-event role). Assigned anyway — just double-check their schedule looks right.`;
   alert(msg);
 }
 function removeStation(name){
