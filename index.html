@@ -752,14 +752,26 @@ function canAssignVolunteer(ev, volId, heatId, targetStation){
     return {ok:false, level:"orange", kind:"role", role:heldRole.role,
       reason: `${vol.name} is on ${heldRole.role} for the whole event and is also assigned to a per-heat station.`};
   }
-  const heatStart = timeToMin(heat.time), heatEnd = heatStart + ev.raceDuration;
+  // A station volunteer is on duty for the whole 2-hour block their heat
+  // falls in (that's the point of block-based assignment), not just for
+  // heat.time + raceDuration — that longer window is how long a RACER takes
+  // to finish the course, and reusing it here was wrongly flagging people
+  // like Joseph on RowErg for the 10-12 block and Sled Pull for the 12-2
+  // block as "overlapping": his last RowErg heat's raceDuration window spilled
+  // 90 minutes into the next block even though the blocks themselves are
+  // back-to-back, not overlapping.
+  const heatBlock = STATION_BLOCKS.find(b=> timeOverlaps(heat.time, b.start, b.end));
+  const heatStart = heatBlock ? timeToMin(heatBlock.start) : timeToMin(heat.time);
+  const heatEnd = heatBlock ? timeToMin(heatBlock.end) : timeToMin(heat.time) + ev.raceDuration;
   const overlapping = ev.stationAssignments.find(a=>{
     if(a.volunteerId!==volId || a.heatId===heatId) return false;
     // Staying at the SAME station across back-to-back/overlapping heats is normal
     // coverage (that's the whole point of "assign for whole day"), not a conflict.
     if(targetStation && a.station===targetStation) return false;
     const oh = ev.heats.find(h=>h.id===a.heatId); if(!oh) return false;
-    const os = timeToMin(oh.time), oe = os + ev.raceDuration;
+    const ohBlock = STATION_BLOCKS.find(b=> timeOverlaps(oh.time, b.start, b.end));
+    const os = ohBlock ? timeToMin(ohBlock.start) : timeToMin(oh.time);
+    const oe = ohBlock ? timeToMin(ohBlock.end) : timeToMin(oh.time) + ev.raceDuration;
     return heatStart < oe && os < heatEnd;
   });
   if(overlapping){
