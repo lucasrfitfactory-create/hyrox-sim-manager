@@ -308,6 +308,15 @@ const DIRECT_ATHLETE_MODE = new URLSearchParams(window.location.search).get("vie
    takes over the whole page with its own render loop. */
 const DIRECT_STARTLIST_MODE = new URLSearchParams(window.location.search).get("view") === "startlist";
 
+/* ?view=finishtime — a dedicated, no-login, read-only TV/signage display of
+   a single finish time, matching Lucas's Canva "FINISH TIME" slide design.
+   Point a TV/signage box at this one URL and leave it there: whichever
+   result an admin most recently clicked "Display on Screen" for (Results
+   tab) shows up here, and it updates instantly via the same Firestore
+   onSnapshot listener that syncs the rest of the app -- no manual
+   re-pointing at a new link, no polling needed. */
+const DIRECT_FINISHTIME_MODE = new URLSearchParams(window.location.search).get("view") === "finishtime";
+
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
    console under Authentication > Users.
@@ -366,6 +375,7 @@ function updateSyncBadge(text){
    #loginScreen/#appShell elements, so it must never fall into renderAll(). */
 function renderWhateverIsShowing(){
   if(DIRECT_STARTLIST_MODE){ renderStartListTV(); return; }
+  if(DIRECT_FINISHTIME_MODE){ renderFinishTimeTV(); return; }
   renderAll();
   refreshLoginScreenIfVisible();
 }
@@ -2452,6 +2462,17 @@ function fmtElapsed(ms){
   const s = totalSec%60;
   return (h>0 ? String(h).padStart(2,"0")+":" : "") + String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
 }
+// Always shows the hour digits (fmtElapsed above drops them under an hour),
+// since the TV finish-time display's template is fixed at HH:MM:SS.
+function fmtElapsedHMS(ms){
+  if(ms==null) return "00:00:00";
+  if(ms<0) ms=0;
+  const totalSec = Math.floor(ms/1000);
+  const h = Math.floor(totalSec/3600);
+  const m = Math.floor((totalSec%3600)/60);
+  const s = totalSec%60;
+  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+}
 function heatScheduledTs(ev, h){ return new Date(ev.date+"T"+h.time+":00").getTime(); }
 function checkAutoStartHeats(){
   if(!DB) return;
@@ -2646,6 +2667,7 @@ function renderResultsTab(main){
     download(`${ev.name.replace(/[^a-z0-9]+/gi,"_")}_results.csv`, csv);
   });
   wireResultEditButtons();
+  wireTvDisplayButtons();
 }
 function sortResultRows(rows){
   if(resultsFilters.sort==="time") rows.sort((a,b)=>a.elapsedMs-b.elapsedMs);
@@ -2698,6 +2720,30 @@ function wireResultEditButtons(){
     });
   });
 }
+// Pushes a result to the venue TV display (?view=finishtime). Stored on the
+// event itself so it syncs through the same Firestore document as
+// everything else -- the TV page picks it up instantly via its onSnapshot
+// listener, no separate channel needed.
+function displayResultOnScreen(heatId, participantId){
+  const ev = curEvent();
+  const r = (ev.results||[]).find(x=>x.heatId===heatId && x.participantId===participantId);
+  const p = ev.participants.find(x=>x.id===participantId);
+  if(!r || !p) return;
+  ev.tvFinishDisplay = { name: teamLabel(p), division: p.division, elapsedMs: r.elapsedMs, ts: Date.now() };
+  saveDB();
+}
+function wireTvDisplayButtons(){
+  document.querySelectorAll("[data-tv-display]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const [heatId, pid] = b.dataset.tvDisplay.split("|");
+      displayResultOnScreen(heatId, pid);
+      const original = b.textContent;
+      b.textContent = "\u2713 Sent to TV";
+      b.disabled = true;
+      setTimeout(()=>{ b.textContent = original; b.disabled = false; }, 1500);
+    });
+  });
+}
 function renderResultsTable(rows){
   const sorted = sortResultRows(rows.slice());
   if(!sorted.length) return `<div class="card" style="color:var(--muted);">No results recorded yet — save finish times from the Live tab.</div>`;
@@ -2710,7 +2756,7 @@ function renderResultsTable(rows){
         <td>${r.heat?esc(r.heat.division+" · "+r.heat.heatNumberInDivision):"—"}</td>
         <td>${r.heat?fmt12(r.heat.time):"—"}</td>
         <td style="font-variant-numeric:tabular-nums;font-weight:700;">${fmtElapsed(r.elapsedMs)}${r.manuallyEdited?' <span class="badge orange" style="font-size:10px;">edited</span>':''}</td>
-        <td>${r.heat?`<button class="small" data-edit-result="${r.heat.id}|${r.participantId}">Edit</button>`:""}</td>
+        <td>${r.heat?`<button class="small" data-edit-result="${r.heat.id}|${r.participantId}">Edit</button> <button class="small" data-tv-display="${r.heat.id}|${r.participantId}">\ud83d\udcfa Display on Screen</button>`:""}</td>
       </tr>`).join("")}
     </table>
   </div>`;
@@ -2730,7 +2776,7 @@ function renderLeaderboard(ev, divisionFilter){
           <td>${medals[i]||(i+1)}</td>
           <td>${esc(teamLabel(r.participant))}</td>
           <td style="font-variant-numeric:tabular-nums;font-weight:700;">${fmtElapsed(r.elapsedMs)}${r.manuallyEdited?' <span class="badge orange" style="font-size:10px;">edited</span>':''}</td>
-          <td>${r.heat?`<button class="small" data-edit-result="${r.heat.id}|${r.participantId}">Edit</button>`:""}</td>
+          <td>${r.heat?`<button class="small" data-edit-result="${r.heat.id}|${r.participantId}">Edit</button> <button class="small" data-tv-display="${r.heat.id}|${r.participantId}">\ud83d\udcfa Display on Screen</button>`:""}</td>
         </tr>`).join("")}
       </table>
     </div>`;
@@ -3055,6 +3101,55 @@ function renderStartListTV(){
 }
 
 /* =========================================================================
+   TV / SIGNAGE FINISH TIME DISPLAY (?view=finishtime) — public, no-login,
+   read-only. Recreates Lucas's Canva "FINISH TIME" slide natively so a
+   single stable URL can be pointed at a signage box/TV permanently: the
+   Results tab's "Display on Screen" button writes to ev.tvFinishDisplay,
+   and this view re-renders instantly via the same Firestore onSnapshot
+   listener the rest of the app already uses -- no new design link to
+   re-point the TV at each time, and no Canva subscription required.
+   ========================================================================= */
+function renderFinishTimeTV(){
+  const ev = curEvent();
+  if(!ev){
+    document.body.innerHTML = `<div style="min-height:100vh;background:#0b0b0c;color:#fff;display:flex;align-items:center;justify-content:center;font-size:2vw;">Loading…</div>`;
+    return;
+  }
+  const disp = ev.tvFinishDisplay;
+  const dateLabel = ev.date ? ev.date.split("-").join(".") : "";
+  const timeText = fmtElapsedHMS(disp ? disp.elapsedMs : null);
+  const nameText = disp ? disp.name : "Waiting for a result…";
+  const subText = disp && disp.division ? disp.division : "";
+
+  document.body.innerHTML = `
+    <div style="min-height:100vh;background:#0b0b0c;color:#fff;box-sizing:border-box;padding:5vh 6vw;font-family:inherit;display:flex;flex-direction:column;justify-content:space-between;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div style="font-size:2.6vw;font-weight:700;letter-spacing:2px;">FINISH TIME</div>
+          <div style="font-size:1.5vw;color:#9a9a9a;margin-top:8px;">${esc(nameText)}${subText ? ` &middot; ${esc(subText)}` : ""}</div>
+        </div>
+        <div style="font-size:1.7vw;font-style:italic;color:#ccc;">${esc(dateLabel)}</div>
+      </div>
+      <div>
+        <div style="font-size:11vw;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:2px;line-height:1;">${esc(timeText)}</div>
+        <div style="width:100%;height:0.9vh;background:${TV_YELLOW};margin-top:3vh;border-radius:4px;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:6vh;width:auto;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span style="font-size:2.1vw;font-weight:800;letter-spacing:6px;">HYROX</span>
+          <svg width="42" height="30" viewBox="0 0 34 24" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="0,4 30,4 24,10 0,10" fill="#fff"></polygon>
+            <polygon points="0,12 26,12 20,18 0,18" fill="#fff"></polygon>
+            <polygon points="0,20 22,20 18,24 0,24" fill="#fff" opacity="0.7"></polygon>
+          </svg>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================================
    MOBILE VOLUNTEER VIEW
    ========================================================================= */
 function renderMobileVolunteerView(main){
@@ -3360,6 +3455,11 @@ if(DIRECT_STARTLIST_MODE){
   // Public TV/signage display — no login screen, no admin/volunteer state.
   renderStartListTV();
   setInterval(renderStartListTV, 30000);   // periodic refresh of countdown + live/done status
+} else if(DIRECT_FINISHTIME_MODE){
+  // Public TV/signage finish-time display — no login, no polling needed:
+  // Firestore's onSnapshot listener (wired in initCloudSync) re-renders this
+  // instantly whenever a new result is pushed from the Results tab.
+  renderFinishTimeTV();
 } else if(DB.role==="admin" && CLOUD_ENABLED){
   // Don't trust a stale localStorage role — confirm there's a live Firebase
   // session before granting admin UI. This is a UX check only; the real
