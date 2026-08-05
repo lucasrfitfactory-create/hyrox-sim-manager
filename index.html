@@ -1632,8 +1632,13 @@ function handleVolunteerCsvImport(e){
 function renderHeatGen(main){
   const ev = curEvent();
   const violations = validateConstraints(ev);
+  // Staff get a read-only view of the schedule (no timing controls, no
+  // generate/add/remove/drag) — full editing stays admin-only, matching
+  // every other tab staff can see (Live, Results) being look-don't-touch
+  // for anything beyond their narrow allowed actions.
+  const readOnly = !isFullAdmin();
   main.innerHTML = `
-    <div class="card">
+    ${readOnly ? "" : `<div class="card">
       <div class="section-title"><h2>Schedule</h2>${help("Set event timing, then generate the full day schedule automatically in fixed division order: Men's Doubles → Mixed Doubles → Women's Doubles → Men's Solo → Women's Solo → Relay. Click any participant chip to open and edit their record — handy for check-in (e.g. adding a partner name on the spot). Drag participant chips between heats to make manual changes.")}</div>
       <div class="form-grid">
         <div class="form-row"><label>Event Start Time</label><input id="hg_start" type="time" value="${ev.startTime}"></div>
@@ -1649,7 +1654,7 @@ function renderHeatGen(main){
         <select id="hg_endOfDayDivision">${DIVISIONS.map(d=>`<option>${esc(d)}</option>`).join("")}</select>
         <button class="small primary" id="btnAddHeatEndOfDay">+ Add Heat at End of Day</button>
       </div>
-    </div>
+    </div>`}
 
     ${violations.length ? `<div class="card">
       <div class="section-title"><h3>Constraint Warnings</h3>${help("These constraints could not be fully satisfied automatically. Nothing is silently ignored — resolve manually via drag-and-drop or by editing the participant.")}</div>
@@ -1657,19 +1662,20 @@ function renderHeatGen(main){
     </div>` : ""}
 
     <div class="card">
-      <div class="section-title"><h3>Schedule</h3>${help("Grouped by division in run order. Drag a participant chip onto another heat's column to move them, or use the '+ add participant' dropdown at the bottom of a heat to place someone directly. Click the ✕ on a chip to pull them out of a heat without deleting their record. Locked/manual-locked participants are marked and should be moved carefully.")}</div>
+      <div class="section-title"><h3>Schedule</h3>${readOnly ? help("Grouped by division in run order. Read-only — ask a full admin for schedule changes.") : help("Grouped by division in run order. Drag a participant chip onto another heat's column to move them, or use the '+ add participant' dropdown at the bottom of a heat to place someone directly. Click the ✕ on a chip to pull them out of a heat without deleting their record. Locked/manual-locked participants are marked and should be moved carefully.")}</div>
       <div id="heatSchedule">${ev.heats.length ? DIVISIONS.map(div=>{
         const divHeats = ev.heats.filter(h=>h.division===div);
         return `<div class="division-group">
           <div class="division-group-title" style="display:flex;align-items:center;gap:8px;">
             <span>${esc(div)}</span> <span class="badge gray">${divHeats.length} heat${divHeats.length!==1?'s':''}</span>
-            <button class="small addHeatBtn" data-division="${esc(div)}" data-after="${divHeats.length?divHeats[divHeats.length-1].id:''}" title="Add a heat at the end of ${esc(div)} — everything after it shifts later">+ Add Heat</button>
+            ${readOnly ? "" : `<button class="small addHeatBtn" data-division="${esc(div)}" data-after="${divHeats.length?divHeats[divHeats.length-1].id:''}" title="Add a heat at the end of ${esc(div)} — everything after it shifts later">+ Add Heat</button>`}
           </div>
-          ${divHeats.length ? `<div class="heat-schedule-wrap">${divHeats.map(h=>heatColHtml(ev,h)).join("")}</div>` : `<div style="color:var(--muted);font-size:12px;">No heats yet in this division.</div>`}
+          ${divHeats.length ? `<div class="heat-schedule-wrap">${divHeats.map(h=>heatColHtml(ev,h,readOnly)).join("")}</div>` : `<div style="color:var(--muted);font-size:12px;">No heats yet in this division.</div>`}
         </div>`;
       }).join("") : "<div style='color:var(--muted)'>No schedule generated yet.</div>"}</div>
     </div>
   `;
+  if(readOnly) return;
   document.getElementById("btnGenerate").addEventListener("click", ()=>{
     const hasExisting = ev.heats.length || ev.stationAssignments.length || ev.roleAssignments.length;
     if(hasExisting && !confirm("This regenerates the FULL schedule from scratch, based on current participant lists. Any manual moves, added/removed heats, and station/role assignments will be wiped and rebuilt. This can't be undone with the reset button (though Ctrl+Z will still work once). Continue?")) return;
@@ -1765,32 +1771,32 @@ function removeHeat(heatId){
   rebuildHeatTimesAndNumbers(ev);
   saveDB(); renderAll();
 }
-function heatColHtml(ev, h){
+function heatColHtml(ev, h, readOnly){
   const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
-  const candidates = ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id) && !p.canceled);
+  const candidates = readOnly ? [] : ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id) && !p.canceled);
   return `<div class="heat-col" data-heat="${h.id}">
     <div class="heat-header">
       <div class="heat-header-top">
         <span class="heat-num">Heat ${h.heatNumberInDivision}</span>
-        <button class="small danger removeHeatBtn" data-heat="${h.id}" title="Remove this heat — later heats shift earlier" style="padding:0 5px;">🗑</button>
+        ${readOnly ? "" : `<button class="small danger removeHeatBtn" data-heat="${h.id}" title="Remove this heat — later heats shift earlier" style="padding:0 5px;">🗑</button>`}
       </div>
       <div class="heat-time">${fmt12(h.time)}</div>
     </div>
-    ${parts.map(p=>`<div class="participant-chip openParticipantChip ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" draggable="true" data-pid="${p.id}" title="Click to open/edit this participant">
+    ${parts.map(p=>`<div class="participant-chip ${readOnly?'':'openParticipantChip'} ${p.constraints&&p.constraints.some(c=>c.type==='manualLock')?'locked':''}" ${readOnly?'':'draggable="true"'} data-pid="${p.id}" ${readOnly?'':'title="Click to open/edit this participant"'}>
       <span>${p.checkedIn?'✅ ':''}${esc(teamLabel(p))}</span>
       <span style="display:flex;gap:4px;align-items:center;">
         ${(p.constraints||[]).some(c=>c.type==='vip')?'<span class="tag">VIP</span>':''}
-        <button class="small danger removeFromHeatBtn" data-heat="${h.id}" data-pid="${p.id}" style="padding:0 5px;" title="Remove from this heat">✕</button>
+        ${readOnly ? "" : `<button class="small danger removeFromHeatBtn" data-heat="${h.id}" data-pid="${p.id}" style="padding:0 5px;" title="Remove from this heat">✕</button>`}
       </span>
     </div>`).join("")}
     ${parts.length < CAPACITY[h.division] ? `<div style="color:var(--orange);font-size:11px;">Under capacity</div>` : ""}
     ${parts.length > CAPACITY[h.division] ? `<div style="color:var(--red);font-size:11px;">Over capacity (manual)</div>` : ""}
-    <div style="margin-top:8px;">
+    ${readOnly ? "" : `<div style="margin-top:8px;">
       <select class="addToHeatSelect" data-heat="${h.id}" style="width:100%;font-size:11px;">
         <option value="">+ add participant…</option>
         ${candidates.map(p=>`<option value="${p.id}">${esc(teamLabel(p))}</option>`).join("")}
       </select>
-    </div>
+    </div>`}
   </div>`;
 }
 function wireHeatDragDrop(){
