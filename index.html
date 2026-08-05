@@ -3129,7 +3129,7 @@ function renderFinishTimeTV(){
   const grainBg = `radial-gradient(ellipse at center, #161616 0%, #0a0a0a 100%), url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'120\' height=\'120\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'2\' stitchTiles=\'stitch\'/%3E%3CfeColorMatrix type=\'saturate\' values=\'0\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\' opacity=\'0.05\'/%3E%3C/svg%3E")`;
 
   document.body.innerHTML = `
-    <div style="min-height:100vh;background:${grainBg};background-blend-mode:overlay;color:#fff;box-sizing:border-box;padding:5vh 5vw;font-family:'Poppins',sans-serif;display:flex;flex-direction:column;">
+    <div id="tvFinishOuter" style="min-height:100vh;color:#fff;box-sizing:border-box;padding:5vh 5vw;font-family:'Poppins',sans-serif;display:flex;flex-direction:column;">
       <div style="flex:1;display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div style="font-size:2.4vw;font-weight:700;letter-spacing:1px;">FINISH TIME</div>
@@ -3137,8 +3137,8 @@ function renderFinishTimeTV(){
         </div>
         <div style="font-size:1.6vw;font-weight:500;font-style:italic;color:#ccc;">${esc(dateLabel)}</div>
       </div>
-      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
-        <div id="tvFinishTimeText" style="display:inline-block;font-size:16vw;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:2px;line-height:1;">${esc(timeText)}</div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;">
+        <div id="tvFinishTimeText" style="font-size:16vw;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:2px;line-height:1;white-space:nowrap;">${esc(timeText)}</div>
         <div id="tvFinishTimeRule" style="height:0.8vh;background:${TV_YELLOW};margin-top:3vh;border-radius:3px;"></div>
       </div>
       <div style="flex:1;display:flex;justify-content:space-between;align-items:center;">
@@ -3147,8 +3147,27 @@ function renderFinishTimeTV(){
       </div>
     </div>
   `;
+  // The grain-texture background is set via the DOM style property (not
+  // interpolated straight into the HTML string above) because its value
+  // contains a url("...") with literal double-quotes -- embedding that
+  // directly inside style="..." (also double-quoted) makes the HTML parser
+  // close the attribute early at the first quote inside url("...), silently
+  // dropping every style declared after it in that string. That's exactly
+  // what broke padding and the flex layout here before: this whole
+  // container ended up with no display:flex, no flex-direction, and no
+  // padding at all, because they were textually AFTER the background
+  // declaration and got cut off along with it.
+  const outerEl = document.getElementById("tvFinishOuter");
+  if(outerEl){
+    outerEl.style.background = grainBg;
+    outerEl.style.backgroundBlendMode = "overlay";
+  }
   // Size the underline to the number itself (Canva's rule sits directly
-  // under the time, not stretched full-bleed across the screen).
+  // under the time, not stretched full-bleed across the screen). Needs
+  // align-items:flex-start on the parent above too -- a flex column
+  // container defaults to align-items:stretch, which was silently forcing
+  // the time text (and therefore this width measurement) to the full
+  // container width regardless of its actual content size.
   const timeEl = document.getElementById("tvFinishTimeText");
   const ruleEl = document.getElementById("tvFinishTimeRule");
   if(timeEl && ruleEl){ ruleEl.style.width = timeEl.getBoundingClientRect().width + "px"; }
