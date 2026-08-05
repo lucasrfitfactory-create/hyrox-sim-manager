@@ -3177,7 +3177,12 @@ function renderFinishTimeTV(){
   function fitFinishTimeCanvas(){
     const canvas = document.getElementById("tvFinishCanvas");
     if(!canvas) return;
-    const scale = Math.max(window.innerWidth/1920, window.innerHeight/1080);
+    // Math.min ("contain") rather than Math.max ("cover") -- if the signage
+    // widget's actual aspect ratio isn't exactly 16:9, this always shows the
+    // WHOLE design letterboxed with a plain black bar on whichever axis has
+    // extra room, rather than risking the header or logos getting silently
+    // cropped off-screen the way the previous cover-based version could.
+    const scale = Math.min(window.innerWidth/1920, window.innerHeight/1080);
     const offsetX = (window.innerWidth - 1920*scale)/2;
     const offsetY = (window.innerHeight - 1080*scale)/2;
     canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
