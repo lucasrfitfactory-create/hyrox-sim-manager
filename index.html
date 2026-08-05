@@ -2928,16 +2928,40 @@ function renderScheduleTable(ev){
    ========================================================================= */
 const TV_LOGO_URL = "https://cdn.prod.website-files.com/695d5fde2fc058d6e19d5fff/695d6462b0d560da6de1bfd4_logo.png";
 const TV_YELLOW = "#FFD400"; // HYROX brand yellow, used as this display's secondary accent
-function tvCountdownText(ev){
-  // Note: kept as a separate function (rather than inline) since renderStartListTV()
-  // calls it once per render and the 30s refresh interval keeps the countdown fresh
-  // without needing a per-second clock tick.
+// Note: kept as a separate function (rather than inline) since renderStartListTV()
+// calls it once per render and the 30s refresh interval keeps the countdown fresh
+// without needing a per-second clock tick.
+function tvCountdownParts(ev){
   const diff = daysUntil(ev);
   const abs = Math.abs(diff);
   const d = Math.floor(abs/86400000), h = Math.floor((abs%86400000)/3600000), m = Math.floor((abs%3600000)/60000);
-  if(diff>0) return `${d}d ${h}h ${m}m until race day`;
-  if(diff > -3*3600000) return "Race day is here";
-  return `Race started ${d}d ${h}h ago`;
+  if(diff>0) return {mode:"counting", d, h, m};
+  if(diff > -3*3600000) return {mode:"today"};
+  return {mode:"started", d, h};
+}
+// Renders the countdown as three stacked Days / Hours / Minutes columns
+// (big bold numbers, small labels underneath) instead of one plain "4d 1h
+// 21m until race day" text line -- reads much more like an actual event
+// countdown at a glance, especially on the TV display and the embedded
+// public start list.
+function renderTvCountdownHtml(ev){
+  const p = tvCountdownParts(ev);
+  if(p.mode==="today"){
+    return `<div style="font-size:1.3em;font-weight:800;color:${TV_YELLOW};">Race day is here</div>`;
+  }
+  if(p.mode==="started"){
+    return `<div style="font-size:1.3em;font-weight:800;color:${TV_YELLOW};">Race started ${p.d}d ${p.h}h ago</div>`;
+  }
+  const unit = (val, label) => `<div style="text-align:center;">
+    <div style="font-size:2.1em;font-weight:800;color:${TV_YELLOW};line-height:1;">${val}</div>
+    <div style="font-size:0.62em;font-weight:700;color:var(--muted);letter-spacing:0.6px;margin-top:3px;">${label}</div>
+  </div>`;
+  return `
+    <div style="display:flex;gap:16px;justify-content:flex-end;">
+      ${unit(p.d, "DAYS")}${unit(p.h, "HOURS")}${unit(p.m, "MINS")}
+    </div>
+    <div style="font-size:0.8em;color:var(--muted);margin-top:4px;">until race day</div>
+  `;
 }
 function renderStartListTV(){
   const ev = curEvent();
@@ -2952,7 +2976,7 @@ function renderStartListTV(){
 
   const nameParts = ev.name.split(/\s+[-\u2013\u2014]\s+/).map(s=>s.trim()).filter(Boolean);
   const eventTitle = nameParts.join(" · ");
-  const countdownText = tvCountdownText(ev);
+
 
   const cardStyle = {
     upcoming: `border:2px solid var(--border);background:var(--bg3);`,
@@ -2987,7 +3011,7 @@ function renderStartListTV(){
           </div>
           <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:48px;width:auto;">
           <div style="text-align:right;">
-            <div style="font-size:1.3em;font-weight:800;color:${TV_YELLOW};">${esc(countdownText)}</div>
+            ${renderTvCountdownHtml(ev)}
           </div>
         </div>
         <div id="tvGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(${cardMinW}px,1fr));gap:${10*fontScale}px;align-content:start;">
