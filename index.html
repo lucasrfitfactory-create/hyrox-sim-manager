@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>HYROX Simulation Manager — Fit Factory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,500;0,700;0,800;1,500&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#0d1117; --bg2:#151b23; --bg3:#1c2530; --border:#2a3441; --text:#e6edf3; --muted:#8b96a5;
@@ -3121,32 +3124,41 @@ function renderFinishTimeTV(){
   const nameText = disp ? disp.name : "Waiting for a result…";
   const subText = disp && disp.division ? disp.division : "";
 
+  // Subtle grain overlay (SVG feTurbulence, no external image) to match the
+  // textured black background in the Canva slide instead of flat black.
+  const grainBg = `radial-gradient(ellipse at center, #161616 0%, #0a0a0a 100%), url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'120\' height=\'120\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'2\' stitchTiles=\'stitch\'/%3E%3CfeColorMatrix type=\'saturate\' values=\'0\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\' opacity=\'0.05\'/%3E%3C/svg%3E")`;
+
   document.body.innerHTML = `
-    <div style="min-height:100vh;background:#0b0b0c;color:#fff;box-sizing:border-box;padding:5vh 6vw;font-family:inherit;display:flex;flex-direction:column;justify-content:space-between;">
+    <div style="min-height:100vh;background:${grainBg};background-blend-mode:overlay;color:#fff;box-sizing:border-box;padding:5vh 6vw;font-family:'Poppins',sans-serif;display:flex;flex-direction:column;justify-content:space-between;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
-          <div style="font-size:2.6vw;font-weight:700;letter-spacing:2px;">FINISH TIME</div>
-          <div style="font-size:1.5vw;color:#9a9a9a;margin-top:8px;">${esc(nameText)}${subText ? ` &middot; ${esc(subText)}` : ""}</div>
+          <div style="font-size:2.4vw;font-weight:700;letter-spacing:1px;">FINISH TIME</div>
+          <div style="font-size:1.3vw;font-weight:500;color:#9a9a9a;margin-top:8px;">${esc(nameText)}${subText ? ` &middot; ${esc(subText)}` : ""}</div>
         </div>
-        <div style="font-size:1.7vw;font-style:italic;color:#ccc;">${esc(dateLabel)}</div>
+        <div style="font-size:1.6vw;font-weight:500;font-style:italic;color:#ccc;">${esc(dateLabel)}</div>
       </div>
       <div>
-        <div style="font-size:11vw;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:2px;line-height:1;">${esc(timeText)}</div>
-        <div style="width:100%;height:0.9vh;background:${TV_YELLOW};margin-top:3vh;border-radius:4px;"></div>
+        <div id="tvFinishTimeText" style="display:inline-block;font-size:11vw;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:2px;line-height:1;">${esc(timeText)}</div>
+        <div id="tvFinishTimeRule" style="height:0.8vh;background:${TV_YELLOW};margin-top:3vh;border-radius:3px;"></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:6vh;width:auto;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <span style="font-size:2.1vw;font-weight:800;letter-spacing:6px;">HYROX</span>
-          <svg width="42" height="30" viewBox="0 0 34 24" xmlns="http://www.w3.org/2000/svg">
-            <polygon points="0,4 30,4 24,10 0,10" fill="#fff"></polygon>
-            <polygon points="0,12 26,12 20,18 0,18" fill="#fff"></polygon>
-            <polygon points="0,20 22,20 18,24 0,24" fill="#fff" opacity="0.7"></polygon>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:1.9vw;font-weight:800;letter-spacing:7px;">HYROX</span>
+          <svg width="40" height="26" viewBox="0 0 34 22" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="2,2 32,2 26,8 2,8" fill="#fff"></polygon>
+            <polygon points="2,10 28,10 22,16 2,16" fill="#fff"></polygon>
+            <polygon points="2,18 24,18 20,22 2,22" fill="#fff" opacity="0.75"></polygon>
           </svg>
         </div>
       </div>
     </div>
   `;
+  // Size the underline to the number itself (Canva's rule sits directly
+  // under the time, not stretched full-bleed across the screen).
+  const timeEl = document.getElementById("tvFinishTimeText");
+  const ruleEl = document.getElementById("tvFinishTimeRule");
+  if(timeEl && ruleEl){ ruleEl.style.width = timeEl.getBoundingClientRect().width + "px"; }
 }
 
 /* =========================================================================
