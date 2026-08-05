@@ -2956,16 +2956,21 @@ function renderTvCountdownHtml(ev){
   // thin divider between the number and its label, rather than plain
   // floating text -- much closer to a real countdown-timer widget.
   const pad2 = n => String(n).padStart(2, "0");
-  const unit = (val, label) => `<div style="background:rgba(255,212,0,0.06);border:1px solid rgba(255,212,0,0.35);border-radius:10px;padding:8px 14px 10px;text-align:center;min-width:52px;">
-    <div style="font-size:1.9em;font-weight:800;color:${TV_YELLOW};line-height:1;font-variant-numeric:tabular-nums;">${pad2(val)}</div>
-    <div style="width:22px;height:1px;background:rgba(255,212,0,0.35);margin:5px auto;"></div>
-    <div style="font-size:0.58em;font-weight:700;color:var(--muted);letter-spacing:0.8px;">${label}</div>
+  // Sized well above the header's base font so it reads from across a
+  // room on the TV display -- the auto-fit loop in renderStartListTV()
+  // measures document.body.scrollHeight against the window as a whole, so
+  // a taller header here just means the heat card grid below shrinks a
+  // touch to compensate; everything still lands on one screen.
+  const unit = (val, label) => `<div style="background:rgba(255,212,0,0.06);border:1px solid rgba(255,212,0,0.35);border-radius:14px;padding:14px 22px 16px;text-align:center;min-width:82px;">
+    <div style="font-size:3.4em;font-weight:800;color:${TV_YELLOW};line-height:1;font-variant-numeric:tabular-nums;">${pad2(val)}</div>
+    <div style="width:32px;height:2px;background:rgba(255,212,0,0.35);margin:8px auto;"></div>
+    <div style="font-size:0.85em;font-weight:700;color:var(--muted);letter-spacing:1px;">${label}</div>
   </div>`;
   return `
-    <div style="display:flex;gap:8px;justify-content:flex-end;">
+    <div style="display:flex;gap:14px;justify-content:flex-end;">
       ${unit(p.d, "DAYS")}${unit(p.h, "HOURS")}${unit(p.m, "MINS")}
     </div>
-    <div style="font-size:0.8em;color:var(--muted);margin-top:6px;">until race day</div>
+    <div style="font-size:1em;color:var(--muted);margin-top:8px;">until race day</div>
   `;
 }
 function renderStartListTV(){
