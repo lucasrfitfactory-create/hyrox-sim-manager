@@ -3210,8 +3210,14 @@ function msToDHMS(ms){
   const totalSec = Math.floor(ms/1000);
   return {d:Math.floor(totalSec/86400), h:Math.floor((totalSec%86400)/3600), m:Math.floor((totalSec%3600)/60), s:totalSec%60};
 }
+// A heat can outlast raceDuration (or finish early) — once every one of its
+// participants has a recorded result it's done, regardless of the clock.
+function nhtvHeatIsDone(ev, h){
+  const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
+  return parts.length>0 && parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id));
+}
 function nhtvRacingHeats(ev, now){
-  return (ev.heats||[]).filter(h=>h.actualStartTs && (now-h.actualStartTs) < ev.raceDuration*60000);
+  return (ev.heats||[]).filter(h=>h.actualStartTs && (now-h.actualStartTs) < ev.raceDuration*60000 && !nhtvHeatIsDone(ev,h));
 }
 function nhtvNextHeat(ev){
   return (ev.heats||[]).slice().sort((a,b)=>timeToMin(a.time)-timeToMin(b.time)).find(h=>!h.actualStartTs);
