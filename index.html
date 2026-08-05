@@ -346,7 +346,7 @@ const DIRECT_NEXTHEAT_MODE = new URLSearchParams(window.location.search).get("vi
    console under Authentication > Users.
 
    STAFF_EMAILS: accounts listed here get a restricted "staff" tier instead of
-   full admin — Dashboard, Live, and Results only. This is a UI convenience,
+   full admin — Dashboard, Live, Schedule, and Results only. This is a UI convenience,
    NOT a real security boundary: the Firestore write rule (allow write: if
    request.auth != null) doesn't distinguish which authenticated user is
    writing, so a staff account that opened browser dev tools could still call
@@ -1054,7 +1054,7 @@ const TABS = [
   {id:"live", label:"Live", adminOnly:true, staffOk:true},
   {id:"sponsors", label:"Sponsors", adminOnly:true, staffOk:false},
   {id:"participants", label:"Participants", adminOnly:true, staffOk:false},
-  {id:"heatgen", label:"Schedule", adminOnly:true, staffOk:false},
+  {id:"heatgen", label:"Schedule", adminOnly:true, staffOk:true},
   {id:"volunteers", label:"Volunteers", adminOnly:true, staffOk:false},
   {id:"stations", label:"Stations", adminOnly:true, staffOk:false},
   {id:"results", label:"Results", adminOnly:true, staffOk:true},
@@ -2297,7 +2297,7 @@ function renderSettingsTab(main){
       <div class="section-title"><h3>Signed in as</h3></div>
       ${currentUser ? `
         <div style="font-size:14px;margin-bottom:6px;">📧 <b>${esc(currentUser.email)}</b> <span class="badge ${isFullAdmin()?'green':'orange'}">${isFullAdmin()?'Full Admin':'Staff (restricted)'}</span></div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${isFullAdmin() ? "Full access to every tab and setting." : "Restricted tier — Dashboard, Live, and Results. Sponsors, Participants, Schedule editing, Volunteers/Stations, and Settings are hidden."}</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${isFullAdmin() ? "Full access to every tab and setting." : "Restricted tier — Dashboard, Live, Schedule, and Results. Sponsors, Participants, Volunteers/Stations, and Settings are hidden."}</div>
         <div class="toolbar">
           <button class="small danger" id="btnSettingsSignOut">Sign Out</button>
         </div>
@@ -2309,7 +2309,7 @@ function renderSettingsTab(main){
       <div style="font-size:13px;color:var(--muted);line-height:1.6;">
         This app can't list, add, or delete other admin logins from here — Firebase Authentication only lets a signed-in user manage their own session from client-side code like this. Adding a teammate as admin, or removing someone's access, has to be done directly in the Firebase console.
         <br><br>
-        Which accounts get the restricted "Staff" tier (Dashboard, Live, and Results only) instead of full access is controlled by the <code>STAFF_EMAILS</code> list near the top of the app's code — currently just <code>getfit@fitfactoryfitness.com</code>. Adding another restricted account means editing that list and re-uploading the file. This restriction is UI-level only: it hides tabs and buttons, but the underlying Firestore write permission doesn't yet distinguish between accounts, so treat it as a guardrail against mistakes, not a hard security wall against a staff account acting in bad faith.
+        Which accounts get the restricted "Staff" tier (Dashboard, Live, Schedule, and Results only) instead of full access is controlled by the <code>STAFF_EMAILS</code> list near the top of the app's code — currently just <code>getfit@fitfactoryfitness.com</code>. Adding another restricted account means editing that list and re-uploading the file. This restriction is UI-level only: it hides tabs and buttons, but the underlying Firestore write permission doesn't yet distinguish between accounts, so treat it as a guardrail against mistakes, not a hard security wall against a staff account acting in bad faith.
       </div>
       ${consoleUrl ? `<div class="toolbar" style="margin-top:10px;"><a href="${consoleUrl}" target="_blank" rel="noopener"><button class="small">Open Firebase Authentication Console ↗</button></a></div>` : ""}
     </div>
