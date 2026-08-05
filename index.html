@@ -324,14 +324,13 @@ const DIRECT_FINISHTIME_MODE = new URLSearchParams(window.location.search).get("
    of live rankings per division, sized to fit a single screen (100vw x
    100vh) like the other TV views. Meant for a screen near the finish line
    so athletes can see where they landed right after finishing. Updates in
-   real time via the same Firestore onSnapshot listener as everything else. */
+   real time via the same Firestore onSnapshot listener as everything else.
+   All 5 non-Relay divisions stack one below the other in DIVISIONS order,
+   but a division auto-hides 30 minutes after its last heat finishes (see
+   lbHiddenDivisions in renderLeaderboardTV) so the still-active divisions
+   get the room freed up instead of everything staying open and shrinking
+   forever as the day goes on. */
 const DIRECT_LEADERBOARD_MODE = new URLSearchParams(window.location.search).get("view") === "leaderboard";
-
-/* ?view=leaderboard2 — same idea as ?view=leaderboard above, but for the
-   solo divisions (Men's Solo, then Women's Solo) instead of doubles. Split
-   into its own URL/screen rather than one combined view because 5 division
-   cards don't comfortably fit — and stay readable — on a single TV at once. */
-const DIRECT_LEADERBOARD2_MODE = new URLSearchParams(window.location.search).get("view") === "leaderboard2";
 
 /* ?view=nextheat — a dedicated, no-login, read-only TV/signage display for a
    big screen near the start line: a live countdown to the next heat (with
@@ -402,7 +401,6 @@ function renderWhateverIsShowing(){
   if(DIRECT_STARTLIST_MODE){ renderStartListTV(); return; }
   if(DIRECT_FINISHTIME_MODE){ renderFinishTimeTV(); return; }
   if(DIRECT_LEADERBOARD_MODE){ renderLeaderboardTV(); return; }
-  if(DIRECT_LEADERBOARD2_MODE){ renderLeaderboardTV2(); return; }
   if(DIRECT_NEXTHEAT_MODE){ renderNextHeatTV(); return; }
   renderAll();
   refreshLoginScreenIfVisible();
@@ -2955,19 +2953,40 @@ function renderStartListTV(){
 }
 
 /* =========================================================================
-   TV / SIGNAGE LEADERBOARD — public, no-login, read-only. Same per-division
-   rankings as the Results tab's Leaderboard view, but auto-scaled to fill
-   exactly one screen (same fit-to-screen technique as renderStartListTV) so
-   athletes can see standings right after finishing without the page
-   needing to scroll. Split across two URLs/screens rather than one
-   combined view because all 5 non-Relay divisions don't comfortably fit on
-   a single TV at once:
-     ?view=leaderboard  — the 3 doubles divisions (renderLeaderboardTV)
-     ?view=leaderboard2 — the 2 solo divisions, men then women
-                          (renderLeaderboardTV2)
-   Both stack their division cards one below the other, full width.
+   TV / SIGNAGE LEADERBOARD (?view=leaderboard) — public, no-login,
+   read-only. Same per-division rankings as the Results tab's Leaderboard
+   view, but auto-scaled to fill exactly one screen (same fit-to-screen
+   technique as renderStartListTV) so athletes can see standings right
+   after finishing without the page needing to scroll.
+
+   All 5 non-Relay divisions stack one below the other in DIVISIONS order
+   (Men's Doubles, Mixed Doubles, Women's Doubles, Men's Solo, Women's
+   Solo). There isn't room to keep all 5 fully open at once for the whole
+   day, so a division auto-hides 30 minutes after its last heat finishes —
+   freeing up the screen for whichever division is still active. Since
+   heats are generated in that same DIVISIONS order, in practice this means
+   Men's Doubles wraps up and clears out first, then Mixed Doubles, and so
+   on, rather than needing to hardcode which division starts "open".
    ========================================================================= */
-function renderLeaderboardTVGeneric(lbDivisions){
+// A heat with nobody in it can't block a division from wrapping up; only
+// heats that actually have participants need every one of them finished.
+function lbHeatIsResolved(ev, h){
+  const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
+  return parts.length===0 || parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id));
+}
+// Returns the timestamp at which `div` should disappear from the
+// leaderboard (its last result's savedAt + 30 min), or null if it hasn't
+// wrapped up yet (no heats, nobody ever raced in it, or still in progress).
+function lbDivisionHideAt(ev, div){
+  const divHeats = ev.heats.filter(h=>h.division===div);
+  if(!divHeats.some(h=>h.participantIds.length>0)) return null;
+  if(!divHeats.every(h=>lbHeatIsResolved(ev,h))) return null;
+  const heatIds = new Set(divHeats.map(h=>h.id));
+  const times = (ev.results||[]).filter(r=>heatIds.has(r.heatId)).map(r=>r.savedAt).filter(Boolean);
+  if(!times.length) return null;
+  return Math.max(...times) + 30*60*1000;
+}
+function renderLeaderboardTV(){
   const ev = curEvent();
   if(!ev){
     document.body.innerHTML = `<div style="min-height:100vh;background:var(--bg);color:#fff;display:flex;align-items:center;justify-content:center;font-size:2vw;">Loading…</div>`;
@@ -2975,6 +2994,13 @@ function renderLeaderboardTVGeneric(lbDivisions){
   }
   const rows = getResultsWithMeta(ev);
   const medals = ["🥇","🥈","🥉"];
+  const now = Date.now();
+  // Relay isn't shown on this screen -- per Lucas, just the individual/
+  // doubles divisions matter for the finish-line leaderboard.
+  const lbDivisions = DIVISIONS.filter(d=>d!=="Relay").filter(div=>{
+    const hideAt = lbDivisionHideAt(ev, div);
+    return hideAt===null || now < hideAt;
+  });
 
   function divCardHtml(div, fontScale){
     const list = rows.filter(r=>r.participant.division===div).sort((a,b)=>a.elapsedMs-b.elapsedMs);
@@ -3007,7 +3033,9 @@ function renderLeaderboardTVGeneric(lbDivisions){
           <div style="text-align:right;font-size:1.6em;font-weight:800;letter-spacing:2px;color:${TV_YELLOW};">LEADERBOARD</div>
         </div>
         <div id="lbGrid" style="display:flex;flex-direction:column;gap:${12*fontScale}px;">
-          ${lbDivisions.map(d=>divCardHtml(d, fontScale)).join("")}
+          ${lbDivisions.length
+            ? lbDivisions.map(d=>divCardHtml(d, fontScale)).join("")
+            : `<div style="text-align:center;color:${TV_YELLOW};font-size:${2*fontScale}em;font-weight:800;padding:${40*fontScale}px 0;">🏁 Final results are in — thanks for racing!</div>`}
         </div>
       </div>
     `;
@@ -3034,12 +3062,6 @@ function renderLeaderboardTVGeneric(lbDivisions){
     fontScale = Math.min(1.6, Math.max(0.4, fontScale * ratio));
     render(fontScale);
   }
-}
-function renderLeaderboardTV(){
-  renderLeaderboardTVGeneric(["Men's Doubles","Mixed Doubles","Women's Doubles"]);
-}
-function renderLeaderboardTV2(){
-  renderLeaderboardTVGeneric(["Men's Solo","Women's Solo"]);
 }
 
 /* =========================================================================
@@ -3581,13 +3603,14 @@ if(DIRECT_STARTLIST_MODE){
   // instantly whenever a new result is pushed from the Results tab.
   renderFinishTimeTV();
 } else if(DIRECT_LEADERBOARD_MODE){
-  // Public TV/signage leaderboard (doubles) — no login, no polling needed:
-  // results only change via Firestore writes (finish times saved on the
-  // Live tab), which onSnapshot already re-renders this for instantly.
+  // Public TV/signage leaderboard — no login. Results changes arrive via
+  // Firestore writes (finish times saved on the Live tab), which
+  // onSnapshot already re-renders this for instantly. But the "hide a
+  // division 30 minutes after its last heat finishes" rule is time-based,
+  // not data-based, so it also needs its own periodic tick to actually
+  // catch that 30-minute mark rather than waiting on the next result.
   renderLeaderboardTV();
-} else if(DIRECT_LEADERBOARD2_MODE){
-  // Same as above, but the solos screen.
-  renderLeaderboardTV2();
+  setInterval(renderLeaderboardTV, 60000);
 } else if(DIRECT_NEXTHEAT_MODE){
   // Public TV/signage next-heat countdown — no login. Needs its own
   // per-second ticker (unlike the other TV views) to keep the countdown
