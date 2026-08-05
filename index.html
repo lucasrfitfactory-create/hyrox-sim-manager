@@ -341,7 +341,7 @@ const DIRECT_NEXTHEAT_MODE = new URLSearchParams(window.location.search).get("vi
    console under Authentication > Users.
 
    STAFF_EMAILS: accounts listed here get a restricted "staff" tier instead of
-   full admin — Dashboard, Check-In, and Live only. This is a UI convenience,
+   full admin — Dashboard, Live, and Results only. This is a UI convenience,
    NOT a real security boundary: the Firestore write rule (allow write: if
    request.auth != null) doesn't distinguish which authenticated user is
    writing, so a staff account that opened browser dev tools could still call
@@ -1046,7 +1046,6 @@ document.getElementById("modalBackdrop").addEventListener("click", e=>{ if(e.tar
    ========================================================================= */
 const TABS = [
   {id:"dashboard", label:"Dashboard", adminOnly:false, staffOk:true},
-  {id:"checkin", label:"Check-In", adminOnly:true, staffOk:true},
   {id:"live", label:"Live", adminOnly:true, staffOk:true},
   {id:"sponsors", label:"Sponsors", adminOnly:true, staffOk:false},
   {id:"participants", label:"Participants", adminOnly:true, staffOk:false},
@@ -1054,7 +1053,6 @@ const TABS = [
   {id:"volunteers", label:"Volunteers", adminOnly:true, staffOk:false},
   {id:"stations", label:"Stations", adminOnly:true, staffOk:false},
   {id:"results", label:"Results", adminOnly:true, staffOk:true},
-  {id:"schedule", label:"Full Schedule", adminOnly:false, staffOk:true},
   {id:"settings", label:"Settings", adminOnly:true, staffOk:false}
 ];
 
@@ -1094,7 +1092,6 @@ function renderAll(){
   if(DB.role==="participant"){ main.innerHTML=""; renderParticipantView(main); return; }
   main.innerHTML = "";
   if(currentTab==="dashboard") renderDashboard(main);
-  else if(currentTab==="checkin") renderCheckInTab(main);
   else if(currentTab==="sponsors") renderSponsors(main);
   else if(currentTab==="participants") renderParticipants(main);
   else if(currentTab==="heatgen") renderHeatGen(main);
@@ -1102,7 +1099,6 @@ function renderAll(){
   else if(currentTab==="stations") renderStationsTab(main);
   else if(currentTab==="live") renderLiveTab(main);
   else if(currentTab==="results") renderResultsTab(main);
-  else if(currentTab==="schedule") renderSchedule(main);
   else if(currentTab==="settings") renderSettingsTab(main);
 }
 
@@ -1161,7 +1157,6 @@ function renderDashboard(main){
         <div class="label">Total Participants ${help("Actual athlete headcount, not registration rows — a Doubles/Mixed Doubles entry counts as 2 people. Relay counts 1 + however many names are in that entry's Partner Names field (comma-separated), so fill that in for an accurate count. Goal line is 100 participants.")}</div>
         <div style="background:var(--bg3);border-radius:6px;height:6px;margin-top:6px;overflow:hidden;"><div style="background:${goalPct>=100?'var(--green)':'var(--accent)'};height:100%;width:${goalPct}%;"></div></div>
       </div>
-      <div class="stat"><div class="num">${active.filter(p=>p.checkedIn).length} <span style="font-size:13px;color:var(--muted);font-weight:400;">/ ${active.length}</span></div><div class="label">Checked In</div></div>
       <div class="stat"><div class="num">${ev.heats.length}</div><div class="label">Heats Scheduled</div></div>
       <div class="stat"><div class="num">${ev.sponsors.length}</div><div class="label">Sponsors (${sponsorConfirmed} confirmed)</div></div>
       <div class="stat"><div class="num">${ev.volunteers.length}</div><div class="label">Volunteers</div></div>
@@ -2297,7 +2292,7 @@ function renderSettingsTab(main){
       <div class="section-title"><h3>Signed in as</h3></div>
       ${currentUser ? `
         <div style="font-size:14px;margin-bottom:6px;">📧 <b>${esc(currentUser.email)}</b> <span class="badge ${isFullAdmin()?'green':'orange'}">${isFullAdmin()?'Full Admin':'Staff (restricted)'}</span></div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${isFullAdmin() ? "Full access to every tab and setting." : "Restricted tier — Dashboard, Check-In, Live, Full Schedule (read-only), and Results. Sponsors, Participants, Schedule editing, Volunteers/Stations, and Settings are hidden. Can add/edit a partner's name at check-in, but not division, pricing, payment status, or scheduling constraints."}</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${isFullAdmin() ? "Full access to every tab and setting." : "Restricted tier — Dashboard, Live, and Results. Sponsors, Participants, Schedule editing, Volunteers/Stations, and Settings are hidden."}</div>
         <div class="toolbar">
           <button class="small danger" id="btnSettingsSignOut">Sign Out</button>
         </div>
@@ -2309,7 +2304,7 @@ function renderSettingsTab(main){
       <div style="font-size:13px;color:var(--muted);line-height:1.6;">
         This app can't list, add, or delete other admin logins from here — Firebase Authentication only lets a signed-in user manage their own session from client-side code like this. Adding a teammate as admin, or removing someone's access, has to be done directly in the Firebase console.
         <br><br>
-        Which accounts get the restricted "Staff" tier (Dashboard, Check-In, Live only) instead of full access is controlled by the <code>STAFF_EMAILS</code> list near the top of the app's code — currently just <code>getfit@fitfactoryfitness.com</code>. Adding another restricted account means editing that list and re-uploading the file. This restriction is UI-level only: it hides tabs and buttons, but the underlying Firestore write permission doesn't yet distinguish between accounts, so treat it as a guardrail against mistakes, not a hard security wall against a staff account acting in bad faith.
+        Which accounts get the restricted "Staff" tier (Dashboard, Live, and Results only) instead of full access is controlled by the <code>STAFF_EMAILS</code> list near the top of the app's code — currently just <code>getfit@fitfactoryfitness.com</code>. Adding another restricted account means editing that list and re-uploading the file. This restriction is UI-level only: it hides tabs and buttons, but the underlying Firestore write permission doesn't yet distinguish between accounts, so treat it as a guardrail against mistakes, not a hard security wall against a staff account acting in bad faith.
       </div>
       ${consoleUrl ? `<div class="toolbar" style="margin-top:10px;"><a href="${consoleUrl}" target="_blank" rel="noopener"><button class="small">Open Firebase Authentication Console ↗</button></a></div>` : ""}
     </div>
@@ -2810,190 +2805,15 @@ function renderLeaderboard(ev, divisionFilter){
   }).join("");
 }
 
-/* =========================================================================
-   CHECK-IN TAB — front desk marks arrivals on event day
-   ========================================================================= */
-function checkInParticipant(pid){
-  const ev = curEvent();
-  const p = ev.participants.find(x=>x.id===pid); if(!p) return;
-  p.checkedIn = true; p.checkedInAt = Date.now();
-  saveDB(); renderAll();
-}
-function undoCheckIn(pid){
-  const ev = curEvent();
-  const p = ev.participants.find(x=>x.id===pid); if(!p) return;
-  if(!confirm(`Undo check-in for ${teamLabel(p)}? Only do this if they were checked in by mistake.`)) return;
-  p.checkedIn = false; p.checkedInAt = null;
-  saveDB(); renderAll();
-}
-// Deliberately narrow: front desk can fix the team/partner name at check-in
-// without touching pricing, payment status, division, or scheduling constraints
-// (that stays in the full Participants editor, which staff accounts don't see).
+// Deliberately narrow: an athlete can add/edit their own partner name from
+// the self-service participant view without touching pricing, payment
+// status, division, or scheduling constraints (that stays in the full
+// Participants editor, which staff accounts don't see).
 function updateParticipantTeamInfo(pid, partnerNames){
   const ev = curEvent();
   const p = ev.participants.find(x=>x.id===pid); if(!p) return;
   p.partnerNames = partnerNames.trim();
   saveDB(); renderAll();
-}
-let checkInSearch = "";
-let checkInEditingId = null;
-let checkInFilters = { status:"all", division:"", sort:"heat" };
-function renderCheckInTab(main){
-  const ev = curEvent();
-  const q = checkInSearch.trim().toLowerCase();
-  const heatOf = pid => ev.heats.find(h=>h.participantIds.includes(pid));
-  let list = activeParticipants(ev);
-  if(q){
-    list = list.filter(p=>
-      fullName(p).toLowerCase().includes(q) ||
-      (p.email||"").toLowerCase().includes(q) ||
-      (p.partnerNames||"").toLowerCase().includes(q)
-    );
-  }
-  if(checkInFilters.division) list = list.filter(p=>p.division===checkInFilters.division);
-  if(checkInFilters.status==="in") list = list.filter(p=>p.checkedIn);
-  if(checkInFilters.status==="pending") list = list.filter(p=>!p.checkedIn);
-
-  const divRank = d => DIVISIONS.indexOf(d);
-  const heatMin = p => { const h=heatOf(p.id); return h ? timeToMin(h.time) : 999999; };
-  if(checkInFilters.sort==="heat"){
-    list.sort((a,b)=> heatMin(a)-heatMin(b) || divRank(a.division)-divRank(b.division) || fullName(a).localeCompare(fullName(b)));
-  } else if(checkInFilters.sort==="division"){
-    list.sort((a,b)=> divRank(a.division)-divRank(b.division) || heatMin(a)-heatMin(b) || fullName(a).localeCompare(fullName(b)));
-  } else if(checkInFilters.sort==="arrival"){
-    list.sort((a,b)=> (b.checkedInAt||0)-(a.checkedInAt||0) || fullName(a).localeCompare(fullName(b)));
-  } else {
-    list.sort((a,b)=> fullName(a).localeCompare(fullName(b)));
-  }
-
-  const activeTotal = activeParticipants(ev).length;
-  const totalCheckedIn = activeParticipants(ev).filter(p=>p.checkedIn).length;
-  const pct = activeTotal ? Math.round((totalCheckedIn/activeTotal)*100) : 0;
-  main.innerHTML = `
-    <div class="card">
-      <div class="section-title"><h2>Check-In</h2>${help("Search a name, tap Check In when they arrive. Doubles/relay teams check in together as one entry. Sort by Heat Time to see who's racing soon, or Arrival to review who just checked in.")}</div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <div style="font-size:15px;">✅ <b>${totalCheckedIn}</b> / ${activeTotal} checked in</div>
-        <div style="flex:1;background:var(--bg3);border-radius:6px;height:8px;overflow:hidden;max-width:240px;"><div style="background:var(--green);height:100%;width:${pct}%;"></div></div>
-      </div>
-      <input id="checkinSearch" placeholder="🔍 Search by name or email…" value="${esc(checkInSearch)}" style="font-size:18px;padding:14px;width:100%;box-sizing:border-box;" autocomplete="off">
-      <div class="toolbar" style="margin-top:10px;">
-        <button class="small ${checkInFilters.status==='all'?'primary':''}" data-status="all">All (${activeTotal})</button>
-        <button class="small ${checkInFilters.status==='pending'?'primary':''}" data-status="pending">Not Arrived (${activeTotal-totalCheckedIn})</button>
-        <button class="small ${checkInFilters.status==='in'?'primary':''}" data-status="in">Arrived (${totalCheckedIn})</button>
-        <div class="spacer"></div>
-        <select id="checkinDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${checkInFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
-        <select id="checkinSort">
-          <option value="heat" ${checkInFilters.sort==='heat'?'selected':''}>Sort: Heat Time</option>
-          <option value="division" ${checkInFilters.sort==='division'?'selected':''}>Sort: Division</option>
-          <option value="name" ${checkInFilters.sort==='name'?'selected':''}>Sort: Name</option>
-          <option value="arrival" ${checkInFilters.sort==='arrival'?'selected':''}>Sort: Arrival Time</option>
-        </select>
-      </div>
-    </div>
-    <div class="checkin-grid">
-      ${!list.length ? `<div class="card" style="color:var(--muted);">No matches.</div>` : list.map(p=>{
-        const h = heatOf(p.id);
-        const isTeam = p.division.indexOf("Doubles")!==-1 || p.division==="Relay";
-        const editing = checkInEditingId===p.id;
-        return `<div class="card checkin-card ${p.checkedIn?'checkin-done':''}">
-          <div class="checkin-card-top">
-            <div>
-              <div class="checkin-name">${esc(teamLabel(p))}</div>
-              <div class="checkin-meta">${esc(p.division)}${h?" · "+fmt12(h.time)+" · Heat "+h.heatNumberInDivision:" · not scheduled"}</div>
-            </div>
-            ${p.checkedIn
-              ? `<button class="small" data-undo-checkin="${p.id}">Undo</button>`
-              : `<button class="primary checkin-btn" data-checkin="${p.id}">✓ Check In</button>`}
-          </div>
-          ${p.checkedIn ? `<div class="badge green" style="margin-top:8px;display:inline-block;">✓ Arrived ${new Date(p.checkedInAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>` : ""}
-          ${isTeam ? `<div style="margin-top:8px;">
-            <button class="small ghost" data-edit-team="${p.id}">${editing?'✕ Cancel':(p.partnerNames?'✏️ Edit Partner':'+ Add Partner Name')}</button>
-            ${editing ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-              <input id="ci_partners_${p.id}" placeholder="Partner name(s), comma-separated" value="${esc(p.partnerNames||'')}" style="flex:1;min-width:180px;">
-              <button class="small primary" data-save-team="${p.id}">Save</button>
-            </div>` : (p.partnerNames ? `<div style="font-size:12px;color:var(--muted);margin-top:4px;">with ${esc(p.partnerNames)}</div>` : "")}
-          </div>` : ""}
-        </div>`;
-      }).join("")}
-    </div>
-  `;
-  const searchEl = document.getElementById("checkinSearch");
-  searchEl.addEventListener("input", (e)=>{ checkInSearch = e.target.value; renderAll(); });
-  searchEl.focus();
-  searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length);
-  document.querySelectorAll("[data-status]").forEach(b=> b.addEventListener("click", ()=>{ checkInFilters.status = b.dataset.status; renderAll(); }));
-  document.getElementById("checkinDivision").addEventListener("change",(e)=>{ checkInFilters.division = e.target.value; renderAll(); });
-  document.getElementById("checkinSort").addEventListener("change",(e)=>{ checkInFilters.sort = e.target.value; renderAll(); });
-  document.querySelectorAll("[data-checkin]").forEach(b=> b.addEventListener("click", ()=> checkInParticipant(b.dataset.checkin)));
-  document.querySelectorAll("[data-undo-checkin]").forEach(b=> b.addEventListener("click", ()=> undoCheckIn(b.dataset.undoCheckin)));
-  document.querySelectorAll("[data-edit-team]").forEach(b=>{
-    b.addEventListener("click", ()=>{ checkInEditingId = checkInEditingId===b.dataset.editTeam ? null : b.dataset.editTeam; renderAll(); });
-  });
-  document.querySelectorAll("[data-save-team]").forEach(b=>{
-    b.addEventListener("click", ()=>{
-      const pid = b.dataset.saveTeam;
-      const partnerNames = document.getElementById("ci_partners_"+pid).value;
-      checkInEditingId = null;
-      updateParticipantTeamInfo(pid, partnerNames);
-    });
-  });
-}
-
-/* =========================================================================
-   EVENT SCHEDULE (full synchronized view)
-   ========================================================================= */
-let scheduleFilters = {division:"", volunteer:"", station:"", search:""};
-function renderSchedule(main){
-  const ev = curEvent();
-  scheduleFilters.search = (document.getElementById("globalSearch").value||"").toLowerCase();
-
-  main.innerHTML = `
-    <div class="toolbar no-print">
-      <div class="section-title" style="margin:0;"><h2 style="margin:0;">Full Schedule</h2>${help("Full synchronized view of every heat, station assignment, and volunteer. Filter by division, volunteer, or station. Use Print for a paper copy on event day.")}</div>
-      <div class="spacer"></div>
-      <select id="filterDivision"><option value="">All Divisions</option>${DIVISIONS.map(d=>`<option ${scheduleFilters.division===d?'selected':''}>${d}</option>`).join("")}</select>
-      <select id="filterVolunteer"><option value="">All Volunteers</option>${ev.volunteers.map(v=>`<option value="${v.id}" ${scheduleFilters.volunteer===v.id?'selected':''}>${esc(v.name)}</option>`).join("")}</select>
-      <select id="filterStation"><option value="">All Stations</option>${evStations(ev).map(s=>`<option ${scheduleFilters.station===s?'selected':''}>${s}</option>`).join("")}</select>
-      <button class="small" onclick="window.print()">🖨 Print</button>
-    </div>
-    <div class="card table-wrap" id="scheduleTableWrap"></div>
-  `;
-  ["filterDivision","filterVolunteer","filterStation"].forEach(id=>{
-    document.getElementById(id).addEventListener("change", ()=>{
-      scheduleFilters.division = document.getElementById("filterDivision").value;
-      scheduleFilters.volunteer = document.getElementById("filterVolunteer").value;
-      scheduleFilters.station = document.getElementById("filterStation").value;
-      renderScheduleTable(ev);
-    });
-  });
-  renderScheduleTable(ev);
-}
-function renderScheduleTable(ev){
-  let heats = ev.heats.slice();
-  if(scheduleFilters.division) heats = heats.filter(h=>h.division===scheduleFilters.division);
-  const wrap = document.getElementById("scheduleTableWrap");
-  wrap.innerHTML = `<table>
-    <tr><th>Time</th><th>Division / Heat</th><th>Participants</th><th>Station Assignments</th></tr>
-    ${heats.map(h=>{
-      const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
-      const heatAssigns = ev.stationAssignments.filter(a=>a.heatId===h.id);
-      if(scheduleFilters.volunteer && !heatAssigns.some(a=>a.volunteerId===scheduleFilters.volunteer)) return "";
-      if(scheduleFilters.search && !(h.division+parts.map(fullName).join(" ")).toLowerCase().includes(scheduleFilters.search)) return "";
-      const displayStations = scheduleFilters.station ? [scheduleFilters.station] : evStations(ev);
-      return `<tr>
-        <td>${fmt12(h.time)}</td>
-        <td>${esc(h.division)} · Heat ${h.heatNumberInDivision}</td>
-        <td>${parts.map(p=>esc(teamLabel(p))).join(", ")}</td>
-        <td>${displayStations.map(s=>{
-          let a = heatAssigns.find(x=>x.station===s);
-          if(a && scheduleFilters.volunteer && a.volunteerId!==scheduleFilters.volunteer) a = null;
-          const v = a ? ev.volunteers.find(x=>x.id===a.volunteerId) : null;
-          return `<span class="badge ${v?'gray':'red'}">${esc(s)}: ${v?esc(v.name):'empty'}</span>`;
-        }).join(" ")}</td>
-      </tr>`;
-    }).join("")}
-  </table>`;
 }
 
 /* =========================================================================
@@ -3472,9 +3292,8 @@ function renderMobileVolunteerView(main){
 }
 /* Read-only, block-condensed view of the WHOLE event day (not heat-by-heat)
    so a volunteer can see the full picture — who's racing when, and who's
-   covering what — without wading through 30+ individual heats. Mirrors the
-   admin Full Schedule tab in spirit, condensed to the same 4 STATION_BLOCKS
-   used for staffing. */
+   covering what — without wading through 30+ individual heats, condensed
+   to the same 4 STATION_BLOCKS used for staffing. */
 function renderVolunteerBlockOverview(ev){
   const stations = evStations(ev);
   return `
@@ -3647,7 +3466,7 @@ function renderParticipantResults(){
 function enterApp(){
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("appShell").style.display = "flex";
-  currentTab = DB.role==="admin" ? "dashboard" : "schedule";
+  currentTab = "dashboard";
   renderAll();
 }
 function tryAdminLogin(){
