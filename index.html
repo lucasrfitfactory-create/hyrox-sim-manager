@@ -3128,39 +3128,28 @@ function renderFinishTimeTV(){
   // textured black background in the Canva slide instead of flat black.
   const grainBg = `radial-gradient(ellipse at center, #161616 0%, #0a0a0a 100%), url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'120\' height=\'120\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'2\' stitchTiles=\'stitch\'/%3E%3CfeColorMatrix type=\'saturate\' values=\'0\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\' opacity=\'0.05\'/%3E%3C/svg%3E")`;
 
-  // Signage players (AbleSign etc.) often embed a page in a webview whose
-  // reported viewport doesn't match the physical screen -- with vh/vw-based
-  // sizing that left everything bunched in the top-left corner with a huge
-  // blank gap below on the actual TV, even though it looked correct in a
-  // normal browser tab. Fixed this by building the design as a fixed
-  // 1920x1080 canvas (standard signage/TV resolution) in plain pixels, then
-  // scaling that whole canvas with a JS-computed transform to cover
-  // whatever the real viewport turns out to be -- immune to how any given
-  // signage engine reports its window size.
   document.body.innerHTML = `
-    <div style="position:fixed;inset:0;overflow:hidden;background:#000;">
-      <div id="tvFinishCanvas" style="position:absolute;top:0;left:0;width:1920px;height:1080px;transform-origin:top left;background:${grainBg};background-blend-mode:overlay;color:#fff;box-sizing:border-box;padding:90px 110px;font-family:'Poppins',sans-serif;display:flex;flex-direction:column;justify-content:space-between;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-          <div>
-            <div style="font-size:46px;font-weight:700;letter-spacing:1px;">FINISH TIME</div>
-            <div style="font-size:25px;font-weight:500;color:#9a9a9a;margin-top:10px;">${esc(nameText)}${subText ? ` &middot; ${esc(subText)}` : ""}</div>
-          </div>
-          <div style="font-size:30px;font-weight:500;font-style:italic;color:#ccc;">${esc(dateLabel)}</div>
-        </div>
+    <div style="min-height:100vh;background:${grainBg};background-blend-mode:overlay;color:#fff;box-sizing:border-box;padding:5vh 6vw;font-family:'Poppins',sans-serif;display:flex;flex-direction:column;justify-content:space-between;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
-          <div id="tvFinishTimeText" style="display:inline-block;font-size:212px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:2px;line-height:1;">${esc(timeText)}</div>
-          <div id="tvFinishTimeRule" style="height:9px;background:${TV_YELLOW};margin-top:34px;border-radius:3px;"></div>
+          <div style="font-size:2.4vw;font-weight:700;letter-spacing:1px;">FINISH TIME</div>
+          <div style="font-size:1.3vw;font-weight:500;color:#9a9a9a;margin-top:8px;">${esc(nameText)}${subText ? ` &middot; ${esc(subText)}` : ""}</div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:66px;width:auto;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:36px;font-weight:800;letter-spacing:7px;">HYROX</span>
-            <svg width="40" height="26" viewBox="0 0 34 22" xmlns="http://www.w3.org/2000/svg">
-              <polygon points="2,2 32,2 26,8 2,8" fill="#fff"></polygon>
-              <polygon points="2,10 28,10 22,16 2,16" fill="#fff"></polygon>
-              <polygon points="2,18 24,18 20,22 2,22" fill="#fff" opacity="0.75"></polygon>
-            </svg>
-          </div>
+        <div style="font-size:1.6vw;font-weight:500;font-style:italic;color:#ccc;">${esc(dateLabel)}</div>
+      </div>
+      <div>
+        <div id="tvFinishTimeText" style="display:inline-block;font-size:16vw;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:2px;line-height:1;">${esc(timeText)}</div>
+        <div id="tvFinishTimeRule" style="height:0.8vh;background:${TV_YELLOW};margin-top:3vh;border-radius:3px;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:6vh;width:auto;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:1.9vw;font-weight:800;letter-spacing:7px;">HYROX</span>
+          <svg width="40" height="26" viewBox="0 0 34 22" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="2,2 32,2 26,8 2,8" fill="#fff"></polygon>
+            <polygon points="2,10 28,10 22,16 2,16" fill="#fff"></polygon>
+            <polygon points="2,18 24,18 20,22 2,22" fill="#fff" opacity="0.75"></polygon>
+          </svg>
         </div>
       </div>
     </div>
@@ -3170,25 +3159,6 @@ function renderFinishTimeTV(){
   const timeEl = document.getElementById("tvFinishTimeText");
   const ruleEl = document.getElementById("tvFinishTimeRule");
   if(timeEl && ruleEl){ ruleEl.style.width = timeEl.getBoundingClientRect().width + "px"; }
-  // Scale the fixed canvas to COVER whatever the real viewport is, keeping
-  // the 1920x1080 aspect ratio and centering any overflow -- re-run on
-  // resize/orientation change in case the signage player's webview settles
-  // into a different size after the first paint.
-  function fitFinishTimeCanvas(){
-    const canvas = document.getElementById("tvFinishCanvas");
-    if(!canvas) return;
-    // Math.min ("contain") rather than Math.max ("cover") -- if the signage
-    // widget's actual aspect ratio isn't exactly 16:9, this always shows the
-    // WHOLE design letterboxed with a plain black bar on whichever axis has
-    // extra room, rather than risking the header or logos getting silently
-    // cropped off-screen the way the previous cover-based version could.
-    const scale = Math.min(window.innerWidth/1920, window.innerHeight/1080);
-    const offsetX = (window.innerWidth - 1920*scale)/2;
-    const offsetY = (window.innerHeight - 1080*scale)/2;
-    canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
-  }
-  fitFinishTimeCanvas();
-  window.addEventListener("resize", fitFinishTimeCanvas);
 }
 
 /* =========================================================================
