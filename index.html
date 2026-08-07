@@ -752,6 +752,19 @@ function getUnavailability(ev, vol){
    exactly ev.heatInterval minutes after the previous one. A run's end time
    uses the same "heat time + raceDuration" convention as getUnavailability()
    above, since that's when the last team through that station actually finishes. */
+// A heat slot with nobody racing in it (an empty "Under capacity" heat, or
+// no heat scheduled at that time at all) needs no station coverage — so it
+// shouldn't count as a break in an otherwise-continuous run. Used by
+// groupStationRuns below to bridge exactly those gaps and nothing else.
+function timeSlotHasRacers(ev, timeMin){
+  return ev.heats.some(h=> timeToMin(h.time)===timeMin && h.participantIds.length>0);
+}
+function gapBridgedByEmptyHeats(ev, fromMin, toMin){
+  for(let t=fromMin+ev.heatInterval; t<toMin; t+=ev.heatInterval){
+    if(timeSlotHasRacers(ev, t)) return false;
+  }
+  return true;
+}
 function groupStationRuns(ev, assignments){
   const resolved = assignments
     .map(a=>{ const h = ev.heats.find(x=>x.id===a.heatId); return h ? {station:a.station, timeMin:timeToMin(h.time)} : null; })
@@ -772,7 +785,10 @@ function groupStationRuns(ev, assignments){
     const times = byStation[station].slice().sort((a,b)=>a-b);
     times.forEach(timeMin=>{
       const last = runs[runs.length-1];
-      if(last && last.station===station && timeMin-last.lastTimeMin===ev.heatInterval){
+      const gap = last ? timeMin-last.lastTimeMin : 0;
+      const contiguous = last && last.station===station && gap>0 && gap%ev.heatInterval===0 &&
+        (gap===ev.heatInterval || gapBridgedByEmptyHeats(ev, last.lastTimeMin, timeMin));
+      if(contiguous){
         last.lastTimeMin = timeMin; last.count++;
       } else {
         runs.push({station, firstTimeMin:timeMin, lastTimeMin:timeMin, count:1});
@@ -811,8 +827,11 @@ function capRunEndToBlock(lastTimeMin, rawEnd){
 function summarizeStationAssignments(ev, assignments, volId){
   const segments = [];
   groupStationRuns(ev, assignments).forEach(r=>{
+    // Empty heats (nobody racing) are skipped here too -- same reasoning as
+    // gapBridgedByEmptyHeats above: they need no station coverage, so they
+    // shouldn't register as a co-volunteer change and split the segment.
     const heatsInRun = ev.heats
-      .filter(h=>{ const t=timeToMin(h.time); return t>=r.firstTimeMin && t<=r.lastTimeMin; })
+      .filter(h=>{ const t=timeToMin(h.time); return t>=r.firstTimeMin && t<=r.lastTimeMin && h.participantIds.length>0; })
       .sort((a,b)=>timeToMin(a.time)-timeToMin(b.time));
     let seg = null;
     heatsInRun.forEach(h=>{
@@ -2269,10 +2288,14 @@ function sanitizeRoleAssignments(ev){
 }
 /* Per-block helpers for the "Coverage by Block" grid: within a block, a
    station is either uniformly covered by one volunteer, empty, or "mixed"
-   if the underlying per-heat data disagrees (e.g. edited heat-by-heat below). */
+   if the underlying per-heat data disagrees (e.g. edited heat-by-heat below).
+   Heats with nobody racing in them (an empty "Under capacity" heat, e.g.
+   one added back with +Add Heat but not yet filled) are excluded from this
+   check entirely -- an empty heat needs no station coverage, so it should
+   never be the reason a whole block reads as "Mixed, pick to resolve". */
 function blockAssignmentState(ev, station, block){
   const startMin = timeToMin(block.start), endMin = timeToMin(block.end);
-  const heatsInBlock = ev.heats.filter(h=>{ const t=timeToMin(h.time); return t>=startMin && t<endMin; });
+  const heatsInBlock = ev.heats.filter(h=>{ const t=timeToMin(h.time); return t>=startMin && t<endMin && h.participantIds.length>0; });
   if(!heatsInBlock.length) return {state:"none", volunteerIds:[]};
   const setsPerHeat = heatsInBlock.map(h=>
     ev.stationAssignments.filter(a=>a.heatId===h.id && a.station===station).map(a=>a.volunteerId).sort().join(",")
