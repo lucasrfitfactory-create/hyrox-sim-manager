@@ -3177,16 +3177,17 @@ function nhtvHeroHtml(ev, nextHeat, now, fontScale){
     ${namesHtml}
   </div>`;
 }
-function nhtvRacingCardHtml(h, ev, now, fontScale){
+function nhtvRacingCardHtml(h, ev, now, fontScale, timerEm){
+  timerEm = timerEm || 1.7;
   const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
   const namesHtml = parts.length ? parts.map(p=>`<div>${esc(teamLabel(p))}</div>`).join("") : "Open slot";
   return `<div style="border:2px solid var(--red);background:rgba(248,81,73,0.14);border-radius:14px;padding:${14*fontScale}px ${18*fontScale}px;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-      <div style="font-weight:800;font-size:${1.1*fontScale}em;">${esc(h.division)} · Heat ${h.heatNumberInDivision}</div>
+      <div style="font-weight:800;font-size:${1.1*fontScale}em;">${esc(h.division)} · ${fmt12(h.time)}</div>
       <div style="font-size:${0.9*fontScale}em;">🔴 LIVE</div>
     </div>
     <div style="font-size:${1.1*fontScale}em;font-weight:600;margin-top:6px;line-height:1.3;">${namesHtml}</div>
-    <div class="live-timer" data-live-timer="${h.actualStartTs}" style="font-size:${1.7*fontScale}em;font-weight:800;font-variant-numeric:tabular-nums;color:${TV_YELLOW};margin-top:8px;">${fmtElapsed(now-h.actualStartTs)}</div>
+    <div class="live-timer" data-live-timer="${h.actualStartTs}" style="font-size:${timerEm*fontScale}em;font-weight:800;font-variant-numeric:tabular-nums;color:${TV_YELLOW};margin-top:8px;">${fmtElapsed(now-h.actualStartTs)}</div>
   </div>`;
 }
 function renderNextHeatTV(){
@@ -3303,7 +3304,7 @@ function renderIpadTV(){
         <div style="flex:1;display:flex;align-items:center;justify-content:center;">
           ${racing.length
             ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(${320*fontScale}px,1fr));gap:${16*fontScale}px;align-content:start;width:100%;">
-                ${racing.map(h=>nhtvRacingCardHtml(h, ev, now, fontScale)).join("")}
+                ${racing.map(h=>nhtvRacingCardHtml(h, ev, now, fontScale, 2.3)).join("")}
               </div>`
             : `<div style="text-align:center;color:var(--muted);font-size:${1.6*fontScale}em;font-weight:700;">No heats currently racing</div>`}
         </div>
