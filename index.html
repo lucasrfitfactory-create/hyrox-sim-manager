@@ -2137,13 +2137,10 @@ function renderStationsTab(main){
     <div class="card">
       <div class="section-title"><h2>Stations</h2>${help("Manage which stations exist for this event, then assign volunteers by 2-hour block below. Red cells mean nobody is covering that station yet. Conflicts (racing, a whole-event role, already covering something else at an overlapping time) are never blocked \u2014 you get a heads-up after assigning, and a running list further down, but it's always your call.")}</div>
       <div class="toolbar">
-        <input id="newStationName" placeholder="New station name" style="max-width:220px;">
-        <button class="primary" id="btnAddStation">+ Add Station</button>
-        <div class="spacer"></div>
         <button class="small danger" id="btnResetAssignments">🔄 Reset All Assignments</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;">
-        ${stations.map(s=>`<span class="badge gray" style="display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 10px;">${esc(s)} <button class="small danger removeStationBtn" data-station="${esc(s)}" style="padding:1px 6px;">✕</button></span>`).join("")}
+        ${stations.map(s=>`<span class="badge gray" style="padding:5px 10px;">${esc(s)}</span>`).join("")}
       </div>
     </div>
     <div class="card table-wrap">
@@ -2195,26 +2192,12 @@ function renderStationsTab(main){
   document.querySelectorAll(".roleSelect").forEach(sel=>{
     sel.addEventListener("change", ()=> assignRoleSlot(sel.dataset.role, Number(sel.dataset.slot), sel.value));
   });
-  const addBtn = document.getElementById("btnAddStation");
-  if(addBtn) addBtn.addEventListener("click", ()=>{
-    const input = document.getElementById("newStationName");
-    const name = input.value.trim();
-    if(!name) return;
-    if(evStations(ev).some(s=>s.toLowerCase()===name.toLowerCase())){ alert("That station already exists."); return; }
-    pushUndo();
-    if(!ev.stations || !ev.stations.length) ev.stations = DEFAULT_STATIONS.slice();
-    ev.stations.push(name);
-    saveDB(); renderAll();
-  });
   document.getElementById("btnResetAssignments").addEventListener("click", ()=>{
     if(!confirm("Clear ALL station and role assignments for this event? The station list itself stays as-is — you'll start reassigning from a clean slate.")) return;
     pushUndo();
     ev.stationAssignments = [];
     ev.roleAssignments = [];
     saveDB(); renderAll();
-  });
-  document.querySelectorAll(".removeStationBtn").forEach(b=>{
-    b.addEventListener("click", ()=> removeStation(b.dataset.station));
   });
   document.querySelectorAll(".addSecondVolLink").forEach(link=>{
     link.addEventListener("click", (e)=>{
@@ -2238,14 +2221,6 @@ function renderStationsTab(main){
     refreshSecondDropdownExclusion(sel.closest("td"));
   });
   wireAckWarningButtons();
-}
-function removeStation(name){
-  if(!confirm(`Remove station "${name}"? Any existing assignments to it will be cleared.`)) return;
-  const ev = curEvent();
-  pushUndo();
-  ev.stations = evStations(ev).filter(s=>s!==name);
-  ev.stationAssignments = ev.stationAssignments.filter(a=>a.station!==name);
-  saveDB(); renderAll();
 }
 function assignRoleSlot(role, slotIndex, volId){
   const ev = curEvent();
