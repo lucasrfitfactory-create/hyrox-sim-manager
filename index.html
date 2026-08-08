@@ -1831,7 +1831,14 @@ function removeHeatConfirmed(heatId, shiftLaterHeats){
 }
 function heatColHtml(ev, h, readOnly){
   const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
-  const candidates = readOnly ? [] : ev.participants.filter(p=>p.division===h.division && !h.participantIds.includes(p.id) && !p.canceled);
+  // Any division can be placed in any heat (e.g. a Women's Solo athlete
+  // filling a spare Doubles slot) -- cross-division candidates are just
+  // labeled with their real division so it's obvious what's being picked,
+  // and adding one prompts a confirm (see confirmCrossDivisionAdd) rather
+  // than being blocked or silently allowed.
+  const candidates = readOnly ? [] : ev.participants
+    .filter(p=>!h.participantIds.includes(p.id) && !p.canceled)
+    .sort((a,b)=> (a.division===h.division?0:1)-(b.division===h.division?0:1));
   return `<div class="heat-col" data-heat="${h.id}">
     <div class="heat-header">
       <div class="heat-header-top">
@@ -1852,10 +1859,19 @@ function heatColHtml(ev, h, readOnly){
     ${readOnly ? "" : `<div style="margin-top:8px;">
       <select class="addToHeatSelect" data-heat="${h.id}" style="width:100%;font-size:11px;">
         <option value="">+ add participant…</option>
-        ${candidates.map(p=>`<option value="${p.id}">${esc(teamLabel(p))}</option>`).join("")}
+        ${candidates.map(p=>`<option value="${p.id}">${esc(teamLabel(p))}${p.division!==h.division?` — ${esc(p.division)}`:''}</option>`).join("")}
       </select>
     </div>`}
   </div>`;
+}
+// Any division can go in any heat, but moving someone into a heat that
+// doesn't match their own registered division (e.g. a Women's Solo athlete
+// filling a spare Doubles slot) is unusual enough to double-check rather
+// than allow silently -- this is exactly how two people ended up racing in
+// the wrong division's heats after a drag-and-drop mistake.
+function confirmCrossDivisionAdd(p, heat){
+  if(p.division === heat.division) return true;
+  return confirm(`${teamLabel(p)} is registered for ${p.division}, but this is a ${heat.division} heat.\n\nAdd them here anyway?`);
 }
 function wireHeatDragDrop(){
   let dragPid = null, dragFromHeat = null;
@@ -1870,9 +1886,11 @@ function wireHeatDragDrop(){
       const toHeatId = col.dataset.heat;
       if(!dragPid || toHeatId===dragFromHeat) return;
       const ev = curEvent();
+      const target = ev.heats.find(h=>h.id===toHeatId);
+      const p = ev.participants.find(x=>x.id===dragPid);
+      if(!target || !p || !confirmCrossDivisionAdd(p, target)) return;
       pushUndo();
       ev.heats.forEach(h=>{ const idx=h.participantIds.indexOf(dragPid); if(idx>=0) h.participantIds.splice(idx,1); });
-      const target = ev.heats.find(h=>h.id===toHeatId);
       target.participantIds.push(dragPid);
       saveDB(); renderAll();
     });
@@ -1884,9 +1902,11 @@ function wireAddToHeat(){
       const pid = sel.value; if(!pid) return;
       const heatId = sel.dataset.heat;
       const ev = curEvent();
+      const target = ev.heats.find(h=>h.id===heatId);
+      const p = ev.participants.find(x=>x.id===pid);
+      if(!target || !p || !confirmCrossDivisionAdd(p, target)){ sel.value=""; return; }
       pushUndo();
       ev.heats.forEach(h=>{ const idx=h.participantIds.indexOf(pid); if(idx>=0) h.participantIds.splice(idx,1); });
-      const target = ev.heats.find(h=>h.id===heatId);
       target.participantIds.push(pid);
       saveDB(); renderAll();
     });
