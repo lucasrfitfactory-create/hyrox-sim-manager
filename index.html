@@ -3154,7 +3154,7 @@ function renderLeaderboardTV(){
   const leftDivisions = lbDivisions.filter(d=>d==="Men's Doubles" || d==="Mixed Doubles" || d==="Women's Doubles");
   const rightDivisions = lbDivisions.filter(d=>d==="Men's Solo" || d==="Women's Solo");
 
-  const LB_MAX_ROWS = 8;
+  const LB_MAX_ROWS = 5;
   function divCardHtml(div, fontScale){
     const full = rows.filter(r=>r.participant.division===div).sort((a,b)=>a.elapsedMs-b.elapsedMs);
     const list = full.slice(0, LB_MAX_ROWS);
