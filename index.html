@@ -3121,11 +3121,11 @@ function renderLeaderboardTV(){
     const hideAt = lbDivisionHideAt(ev, div);
     return hideAt===null || now < hideAt;
   });
-  // Design-only split: doubles on the left, solos on the right, instead of
-  // one long stack. Which divisions show/hide is unchanged (still driven
-  // by lbDivisions above).
-  const doublesDivisions = lbDivisions.filter(d=>d.includes("Doubles"));
-  const soloDivisions = lbDivisions.filter(d=>d.includes("Solo"));
+  // Design-only split into two columns, instead of one long stack. Which
+  // divisions show/hide is unchanged (still driven by lbDivisions above) --
+  // this only decides which side each visible division lands on.
+  const leftDivisions = lbDivisions.filter(d=>d==="Men's Doubles" || d==="Mixed Doubles");
+  const rightDivisions = lbDivisions.filter(d=>d==="Women's Doubles" || d==="Men's Solo" || d==="Women's Solo");
 
   function divCardHtml(div, fontScale){
     const list = rows.filter(r=>r.participant.division===div).sort((a,b)=>a.elapsedMs-b.elapsedMs);
@@ -3159,8 +3159,8 @@ function renderLeaderboardTV(){
         </div>
         <div id="lbGrid" style="${lbDivisions.length ? `display:grid;grid-template-columns:1fr 1fr;gap:${20*fontScale}px;align-items:start;` : ''}">
           ${lbDivisions.length
-            ? `<div style="display:flex;flex-direction:column;gap:${12*fontScale}px;">${doublesDivisions.map(d=>divCardHtml(d, fontScale)).join("")}</div>
-               <div style="display:flex;flex-direction:column;gap:${12*fontScale}px;">${soloDivisions.map(d=>divCardHtml(d, fontScale)).join("")}</div>`
+            ? `<div style="display:flex;flex-direction:column;gap:${12*fontScale}px;">${leftDivisions.map(d=>divCardHtml(d, fontScale)).join("")}</div>
+               <div style="display:flex;flex-direction:column;gap:${12*fontScale}px;">${rightDivisions.map(d=>divCardHtml(d, fontScale)).join("")}</div>`
             : `<div style="text-align:center;color:${TV_YELLOW};font-size:${2*fontScale}em;font-weight:800;padding:${40*fontScale}px 0;">🏁 Final results are in — thanks for racing!</div>`}
         </div>
       </div>
