@@ -2731,7 +2731,21 @@ function renderLiveTab(main){
   });
 }
 setInterval(()=>{
-  checkAutoStartHeats();
+  // This heartbeat used to run unconditionally on EVERY open page -- every
+  // public TV screen, every volunteer's phone, every participant's phone,
+  // as well as the admin device. checkAutoStartHeats() calls saveDB(),
+  // which does a full blind overwrite of the shared Firestore document
+  // using THIS device's own local DB.events. With dozens of devices on
+  // venue wifi, any one of them lagging even slightly behind the latest
+  // Firestore update -- a momentary network hiccup, a backgrounded phone
+  // tab -- would silently roll back everyone else's more recent results
+  // the moment its own stale clock decided a heat should auto-start. That
+  // is what caused heats to randomly "restart" and results to vanish
+  // today. Only admin devices (few, actively watched, not passive kiosks)
+  // should be able to drive this write -- matching what the Live tab's
+  // own help text already assumed ("as long as someone has this tab
+  // open"), which TV/volunteer/participant views were never meant to be.
+  if(DB && DB.role==="admin") checkAutoStartHeats();
   if(!DB) return;
   const onLiveTab = typeof currentTab!=="undefined" && currentTab==="live" && DB.role==="admin";
   if(onLiveTab || DB.role==="participant") updateLiveTimers();
