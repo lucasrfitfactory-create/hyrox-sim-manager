@@ -3239,7 +3239,8 @@ function nhtvHeatIsDone(ev, h){
   return parts.length>0 && parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id));
 }
 function nhtvRacingHeats(ev, now){
-  return (ev.heats||[]).filter(h=>h.actualStartTs && (now-h.actualStartTs) < ev.raceDuration*60000 && !nhtvHeatIsDone(ev,h));
+  return (ev.heats||[]).filter(h=>h.actualStartTs && (now-h.actualStartTs) < ev.raceDuration*60000 && !nhtvHeatIsDone(ev,h))
+    .sort((a,b)=>a.actualStartTs-b.actualStartTs);
 }
 function nhtvNextHeat(ev){
   return (ev.heats||[]).slice().sort((a,b)=>timeToMin(a.time)-timeToMin(b.time)).find(h=>!h.actualStartTs);
