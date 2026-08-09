@@ -3767,7 +3767,15 @@ document.addEventListener("keydown", (e)=>{
   if(e.key==="/" && document.activeElement.tagName!=="INPUT" && document.activeElement.tagName!=="TEXTAREA" && document.activeElement.tagName!=="SELECT"){
     e.preventDefault(); document.getElementById("globalSearch").focus();
   }
-  if(e.ctrlKey && e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
+  // Scoped the same way the "/" shortcut above already is: without this,
+  // Ctrl+Z while typing in ANY field (a stray habitual keystroke, not
+  // asking for the app's undo at all) hijacks native text-undo and instead
+  // reverts the whole event's last saved action -- during a live event
+  // with several devices recording finish times, that action is often a
+  // completely different heat's just-saved result, silently un-finishing
+  // it and restarting its timer. Only fire the app-level undo when focus
+  // isn't in a field, where Ctrl+Z can only mean "undo my last app action".
+  if(e.ctrlKey && e.key.toLowerCase()==="z" && document.activeElement.tagName!=="INPUT" && document.activeElement.tagName!=="TEXTAREA" && document.activeElement.tagName!=="SELECT"){ e.preventDefault(); undo(); }
   if(e.key==="Escape") closeModal();
 });
 
