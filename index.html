@@ -2605,9 +2605,20 @@ function setHeatStartOverride(heatId, hhmm){
   saveDB(); renderAll();
 }
 function resetHeatStart(heatId){
-  if(!confirm("Reset this heat's start? Any finish times already recorded for this heat will be cleared too, since they're calculated from the start time.")) return;
   const ev = curEvent();
   const h = ev.heats.find(x=>x.id===heatId); if(!h) return;
+  // Belt-and-suspenders alongside hiding the button once a heat is fully
+  // finished (renderLiveTab) -- a reset here re-triggers the auto-start
+  // heartbeat within a second on any heat whose scheduled time has passed,
+  // so it silently looks like the heat "started back up" with its results
+  // gone, which is exactly the live-event bug this is guarding against.
+  const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
+  const allFinished = h.actualStartTs && parts.length>0 && parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id));
+  if(allFinished){
+    alert("This heat is already fully finished — resetting it would wipe both recorded times and (if its scheduled time has passed) silently restart it. Use \"Undo\" on the specific result below instead to fix a wrong time.");
+    return;
+  }
+  if(!confirm("Reset this heat's start? Any finish times already recorded for this heat will be cleared too, since they're calculated from the start time.")) return;
   h.actualStartTs = null; h.actualStartSource = null;
   ev.results = (ev.results||[]).filter(r=>r.heatId!==heatId);
   saveDB(); renderAll();
@@ -2670,7 +2681,9 @@ function renderLiveTab(main){
               ? `<div class="live-timer">${fmtElapsed(lastFinishTs-h.actualStartTs)}</div>`
               : `<div class="live-timer" data-live-timer="${h.actualStartTs}">${fmtElapsed(Date.now()-h.actualStartTs)}</div>`}
             <span style="font-size:11px;color:var(--muted);">started ${h.actualStartSource==="auto"?"automatically":h.actualStartSource==="override"?"via manual override":"manually"} at ${new Date(h.actualStartTs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
-            <button class="small danger" data-reset-start="${h.id}" style="margin-top:4px;">↺ Reset Start</button>
+            ${allFinished
+              ? `<span style="font-size:11px;color:var(--muted);margin-top:4px;">Wrong time? Use Undo on that result below, not a reset.</span>`
+              : `<button class="small danger" data-reset-start="${h.id}" style="margin-top:4px;">↺ Reset Start</button>`}
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;">
             ${parts.map(p=>{
