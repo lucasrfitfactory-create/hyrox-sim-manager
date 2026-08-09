@@ -3106,33 +3106,11 @@ function renderStartListTV(){
    technique as renderStartListTV) so athletes can see standings right
    after finishing without the page needing to scroll.
 
-   All 5 non-Relay divisions stack one below the other in DIVISIONS order
-   (Men's Doubles, Mixed Doubles, Women's Doubles, Men's Solo, Women's
-   Solo). There isn't room to keep all 5 fully open at once for the whole
-   day, so a division auto-hides 30 minutes after its last heat finishes —
-   freeing up the screen for whichever division is still active. Since
-   heats are generated in that same DIVISIONS order, in practice this means
-   Men's Doubles wraps up and clears out first, then Mixed Doubles, and so
-   on, rather than needing to hardcode which division starts "open".
+   All 5 non-Relay divisions (Men's Doubles, Mixed Doubles, Women's
+   Doubles on the left; Men's Solo, Women's Solo on the right) stay on
+   screen for the whole event -- each card caps at its top 5 results with
+   a "+N more not shown" note rather than hiding the division entirely.
    ========================================================================= */
-// A heat with nobody in it can't block a division from wrapping up; only
-// heats that actually have participants need every one of them finished.
-function lbHeatIsResolved(ev, h){
-  const parts = h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean);
-  return parts.length===0 || parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id));
-}
-// Returns the timestamp at which `div` should disappear from the
-// leaderboard (its last result's savedAt + 30 min), or null if it hasn't
-// wrapped up yet (no heats, nobody ever raced in it, or still in progress).
-function lbDivisionHideAt(ev, div){
-  const divHeats = ev.heats.filter(h=>h.division===div);
-  if(!divHeats.some(h=>h.participantIds.length>0)) return null;
-  if(!divHeats.every(h=>lbHeatIsResolved(ev,h))) return null;
-  const heatIds = new Set(divHeats.map(h=>h.id));
-  const times = (ev.results||[]).filter(r=>heatIds.has(r.heatId)).map(r=>r.savedAt).filter(Boolean);
-  if(!times.length) return null;
-  return Math.max(...times) + 30*60*1000;
-}
 function renderLeaderboardTV(){
   const ev = curEvent();
   if(!ev){
@@ -3141,13 +3119,10 @@ function renderLeaderboardTV(){
   }
   const rows = getResultsWithMeta(ev);
   const medals = ["🥇","🥈","🥉"];
-  const now = Date.now();
   // Relay isn't shown on this screen -- per Lucas, just the individual/
-  // doubles divisions matter for the finish-line leaderboard.
-  const lbDivisions = DIVISIONS.filter(d=>d!=="Relay").filter(div=>{
-    const hideAt = lbDivisionHideAt(ev, div);
-    return hideAt===null || now < hideAt;
-  });
+  // doubles divisions matter for the finish-line leaderboard. All 5 stay up
+  // the whole event -- no auto-hide once a division wraps up.
+  const lbDivisions = DIVISIONS.filter(d=>d!=="Relay");
   // Design-only split into two columns, instead of one long stack. Which
   // divisions show/hide is unchanged (still driven by lbDivisions above) --
   // this only decides which side each visible division lands on.
