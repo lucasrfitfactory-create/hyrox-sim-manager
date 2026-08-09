@@ -351,6 +351,16 @@ const DIRECT_NEXTHEAT_MODE = new URLSearchParams(window.location.search).get("vi
    (same nhtvRacingHeats/nhtvHeatIsDone logic ?view=nextheat already uses). */
 const DIRECT_IPAD_MODE = new URLSearchParams(window.location.search).get("view") === "ipad";
 
+/* ?view=tv-results — a dedicated, no-login, read-only worklist (not a TV
+   screen itself — meant for a laptop at the finish line): every participant
+   who has a saved finish time, most recent first, each with a "Send to TV"
+   button that pushes their result to ev.tvFinishDisplay (same field the
+   Results tab's button writes, same ?view=finishtime screen picks it up).
+   Deliberately has no other controls — no edit, no undo, nothing that
+   touches a result — so anyone can be handed this laptop without needing
+   an admin login or any risk of them changing something. */
+const DIRECT_TVRESULTS_MODE = new URLSearchParams(window.location.search).get("view") === "tv-results";
+
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
    console under Authentication > Users.
@@ -413,6 +423,7 @@ function renderWhateverIsShowing(){
   if(DIRECT_LEADERBOARD_MODE){ renderLeaderboardTV(); return; }
   if(DIRECT_NEXTHEAT_MODE){ renderNextHeatTV(); return; }
   if(DIRECT_IPAD_MODE){ renderIpadTV(); return; }
+  if(DIRECT_TVRESULTS_MODE){ renderTvResultsView(); return; }
   renderAll();
   refreshLoginScreenIfVisible();
 }
@@ -2840,6 +2851,46 @@ function wireTvDisplayButtons(){
     });
   });
 }
+/* =========================================================================
+   TV-RESULTS WORKLIST (?view=tv-results) \u2014 public, no-login, read-only.
+   Not itself a TV screen -- meant for a laptop at the finish line so
+   whoever's there can find a finisher and hit "Send to TV" without needing
+   an admin login. Every finisher, most recent first; no edit/undo/delete,
+   nothing else touchable.
+   ========================================================================= */
+function renderTvResultsView(){
+  const ev = curEvent();
+  if(!ev){
+    document.body.innerHTML = `<div style="min-height:100vh;background:var(--bg);color:#fff;display:flex;align-items:center;justify-content:center;font-size:2vw;">Loading\u2026</div>`;
+    return;
+  }
+  const rows = getResultsWithMeta(ev).slice().sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+  document.body.innerHTML = `
+    <div style="min-height:100vh;background:var(--bg);color:var(--text);box-sizing:border-box;padding:24px;font-family:inherit;">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;">
+        <img src="hyrox-logo.png" alt="HYROX" style="height:36px;width:auto;">
+        <div>
+          <div style="font-size:1.3em;font-weight:800;">${esc(ev.name)}</div>
+          <div style="font-size:12px;color:var(--muted);">Finished participants \u00b7 most recent first \u00b7 click "Send to TV" to display a time on the finish-line screen</div>
+        </div>
+      </div>
+      ${!rows.length ? `<div class="card" style="color:var(--muted);">No one has finished yet \u2014 this list fills in as times are saved on the Live tab.</div>` : `
+      <div class="card table-wrap">
+        <table>
+          <tr><th>Division</th><th>Participant</th><th>Heat</th><th>Time</th><th></th></tr>
+          ${rows.map(r=>`<tr>
+            <td>${esc(r.participant.division)}</td>
+            <td>${esc(teamLabel(r.participant))}</td>
+            <td>${r.heat?esc(r.heat.division+" \u00b7 "+r.heat.heatNumberInDivision):"\u2014"}</td>
+            <td style="font-variant-numeric:tabular-nums;font-weight:700;font-size:1.1em;">${fmtElapsed(r.elapsedMs)}</td>
+            <td><button class="primary small" data-tv-display="${r.heatId}|${r.participantId}">\ud83d\udcfa Send to TV</button></td>
+          </tr>`).join("")}
+        </table>
+      </div>`}
+    </div>
+  `;
+  wireTvDisplayButtons();
+}
 function renderResultsTable(rows){
   const sorted = sortResultRows(rows.slice());
   if(!sorted.length) return `<div class="card" style="color:var(--muted);">No results recorded yet — save finish times from the Live tab.</div>`;
@@ -3755,6 +3806,12 @@ if(DIRECT_STARTLIST_MODE){
   // heats off the instant they're fully finished.
   renderIpadTV();
   setInterval(tickIpadTV, 1000);
+} else if(DIRECT_TVRESULTS_MODE){
+  // Public, no-login, read-only worklist for the finish-line laptop — no
+  // ticker needed, it's a static list until a new result is saved, and
+  // onSnapshot (wired in initCloudSync) already re-renders this instantly
+  // whenever that happens.
+  renderTvResultsView();
 } else if(DB.role==="admin" && CLOUD_ENABLED){
   // Don't trust a stale localStorage role — confirm there's a live Firebase
   // session before granting admin UI. This is a UX check only; the real
