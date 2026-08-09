@@ -2623,21 +2623,58 @@ function resetHeatStart(heatId){
   ev.results = (ev.results||[]).filter(r=>r.heatId!==heatId);
   saveDB(); renderAll();
 }
+// recordFinish/undoFinish go through a Firestore transaction instead of
+// saveDB()'s blind overwrite -- with 2+ admin devices both clicking "End
+// Race" around the same moment, saveDB() pushes each device's whole local
+// copy of `events`, so whichever save lands second (built before that
+// device had received the other's update yet) silently erases the
+// other's just-recorded result. `mutate` is applied to this device's
+// local copy (for instant UI feedback) AND, inside the transaction, to
+// whatever the server's copy actually is right now -- so a result written
+// a second ago by another laptop is never clobbered.
+function saveResultChange(mutate){
+  mutate(curEvent());
+  renderAll();
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
+  if(!CLOUD_ENABLED || !cloudDocRef || !initialCloudSyncDone){ saveDB(true); return; }
+  updateSyncBadge("Syncing…");
+  const eventId = DB.currentEventId;
+  firebase.firestore().runTransaction(tx=>{
+    return tx.get(cloudDocRef).then(snap=>{
+      const data = (snap.exists && snap.data()) ? snap.data() : null;
+      const serverEvents = clone((data && data.events) ? data.events : DB.events);
+      const serverEvent = serverEvents[eventId] || clone(curEvent());
+      mutate(serverEvent);
+      serverEvents[eventId] = serverEvent;
+      tx.set(cloudDocRef, {events: serverEvents, updatedAt: firebase.firestore.FieldValue.serverTimestamp()});
+    });
+  }).then(()=>{
+    updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
+  }).catch(err=>{
+    console.error("Transactional save failed", err);
+    updateSyncBadge("Cloud sync failed — check connection (saved locally)");
+  });
+}
 function recordFinish(heatId, participantId){
   const ev = curEvent();
   const h = ev.heats.find(x=>x.id===heatId);
   if(!h || !h.actualStartTs){ alert("This heat hasn't started yet."); return; }
-  const elapsedMs = Date.now() - h.actualStartTs;
-  if(!ev.results) ev.results = [];
-  let r = ev.results.find(x=>x.participantId===participantId && x.heatId===heatId);
-  if(r){ r.elapsedMs = elapsedMs; r.savedAt = Date.now(); }
-  else { ev.results.push({id:uid(), heatId, participantId, elapsedMs, savedAt: Date.now()}); }
-  saveDB(); renderAll();
+  const now = Date.now();
+  const newId = uid();
+  saveResultChange(e=>{
+    const eh = e.heats.find(x=>x.id===heatId);
+    if(!eh || !eh.actualStartTs) return;
+    const elapsedMs = now - eh.actualStartTs;
+    if(!e.results) e.results = [];
+    let r = e.results.find(x=>x.participantId===participantId && x.heatId===heatId);
+    if(r){ r.elapsedMs = elapsedMs; r.savedAt = now; }
+    else { e.results.push({id:newId, heatId, participantId, elapsedMs, savedAt: now}); }
+  });
 }
 function undoFinish(heatId, participantId){
-  const ev = curEvent();
-  ev.results = (ev.results||[]).filter(r=>!(r.heatId===heatId && r.participantId===participantId));
-  saveDB(); renderAll();
+  saveResultChange(e=>{
+    e.results = (e.results||[]).filter(r=>!(r.heatId===heatId && r.participantId===participantId));
+  });
 }
 function updateLiveTimers(){
   document.querySelectorAll("[data-live-timer]").forEach(el=>{
