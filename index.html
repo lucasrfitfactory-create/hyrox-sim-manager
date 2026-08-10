@@ -207,6 +207,10 @@ tr:hover td{background:var(--bg3);}
       <button class="primary" style="width:100%;margin-top:10px;" id="btnAdminContinue">Continue</button>
       <div id="adminPasswordError" style="color:var(--red);font-size:12px;margin-top:8px;display:none;">Incorrect email or password. Try again.</div>
     </div>
+    <div id="loginEventPicker" class="hidden" style="margin-top:12px;text-align:left;">
+      <label style="font-size:12px;color:var(--muted);font-weight:600;">Event</label>
+      <select id="loginEventSelect" style="width:100%;margin-top:6px;"></select>
+    </div>
     <div id="volunteerPicker" class="hidden">
       <label style="font-size:12px;color:var(--muted);font-weight:600;">Select your name</label>
       <select id="volunteerSelect"></select>
@@ -436,7 +440,7 @@ function initCloudSync(){
     if(snap.exists && snap.data() && snap.data().events){
       applyingRemoteUpdate = true;
       DB.events = snap.data().events;
-      if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
+      if(!DB.events[DB.currentEventId]) DB.currentEventId = pickDefaultEventId();
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       snapshotGoodState();
@@ -454,7 +458,7 @@ function initCloudSync(){
       if(!data || !data.events) return;
       applyingRemoteUpdate = true;
       DB.events = data.events;
-      if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
+      if(!DB.events[DB.currentEventId]) DB.currentEventId = pickDefaultEventId();
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       snapshotGoodState();
@@ -560,6 +564,24 @@ function loadDB(){
     seedDemoData(ev);
     DB = { events: {[ev.id]: ev}, currentEventId: ev.id, role: null, currentVolunteerId: null, currentParticipantId: null };
   }
+  if(DB.events && !DB.events[DB.currentEventId]) DB.currentEventId = pickDefaultEventId();
+}
+// Picks a sensible event to land on when a device's currentEventId is
+// missing/invalid (new visitor, cleared storage, deleted event) -- the
+// soonest event that hasn't happened yet, or the most recent past one if
+// every event is already over. Object.keys(DB.events)[0] used to be the
+// fallback here, but key order for a Firestore map field isn't guaranteed
+// stable across reads, so a second event could silently become "first"
+// and every fresh visitor (e.g. the public athlete-lookup embed, whose
+// storage is routinely cleared by browsers in a cross-site iframe) would
+// land on the wrong one at random.
+function pickDefaultEventId(){
+  const evs = Object.values(DB.events || {});
+  if(!evs.length) return null;
+  const todayStr = new Date().toISOString().slice(0,10);
+  const upcoming = evs.filter(e=>e.date>=todayStr).sort((a,b)=>a.date.localeCompare(b.date));
+  if(upcoming.length) return upcoming[0].id;
+  return evs.slice().sort((a,b)=>b.date.localeCompare(a.date))[0].id;
 }
 function saveDB(immediate, skipCloud, bypassLock){
   clearTimeout(saveTimer);
@@ -2578,7 +2600,7 @@ function renderSettingsTab(main){
       document.getElementById("btnConfirmRestore").addEventListener("click", ()=>{
         if(!confirm(`Final check: this replaces the entire live database with the ${evList.length} event(s) shown above, for everyone, right now. This cannot be undone. Proceed?`)) return;
         DB.events = parsed.events;
-        if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
+        if(!DB.events[DB.currentEventId]) DB.currentEventId = pickDefaultEventId();
         saveDB(true);
         alert("Import complete — the live database has been replaced and is syncing to the cloud now.");
         renderAll();
@@ -2617,7 +2639,7 @@ function renderSettingsTab(main){
       if(Object.keys(DB.events).length<=1){ alert("Can't delete the only event."); return; }
       if(!confirm(`Permanently delete "${ev.name}"? This removes all its participants, volunteers, heats, and results. This cannot be undone.`)) return;
       delete DB.events[b.dataset.delete];
-      if(DB.currentEventId===b.dataset.delete) DB.currentEventId = Object.keys(DB.events)[0];
+      if(DB.currentEventId===b.dataset.delete) DB.currentEventId = pickDefaultEventId();
       saveDB(undefined, undefined, true); renderAll();
     });
   });
@@ -3761,12 +3783,31 @@ function logout(){
    data lands fail with "we couldn't find your registration" until they hit
    Switch User and reload the screen. This re-populates the picker's lists
    without resetting anything the visitor has already typed. */
+function populateLoginEventSelect(){
+  const sel = document.getElementById("loginEventSelect");
+  const picker = document.getElementById("loginEventPicker");
+  const evs = Object.values(DB.events).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  picker.classList.toggle("hidden", evs.length<=1);
+  sel.innerHTML = evs.map(e=>`<option value="${e.id}" ${e.id===DB.currentEventId?'selected':''}>${esc(e.name)} (${esc(e.date)})</option>`).join("");
+}
+function applyAthleteModeBranding(){
+  if(!DIRECT_ATHLETE_MODE) return;
+  // Event names are typically "HYROX Simulation — August 9" — split so the
+  // date gets its own compact badge instead of wrapping awkwardly in the h1.
+  const nameParts = curEvent().name.split(/\s+[-\u2013\u2014]\s+/).map(s=>s.trim());
+  document.getElementById("loginTitle").textContent = "🏁 " + (nameParts[0] || curEvent().name);
+  const badge = document.getElementById("loginEventBadge");
+  if(nameParts[1]){ badge.textContent = nameParts[1]; badge.classList.remove("hidden"); }
+  else { badge.classList.add("hidden"); }
+}
 function refreshLoginScreenIfVisible(){
   if(DB.role) return; // already logged in — nothing to refresh
   if(document.getElementById("loginScreen").style.display === "none") return;
+  populateLoginEventSelect();
   const vs = document.getElementById("volunteerSelect");
   if(vs) vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
   renderParticipantResults();
+  applyAthleteModeBranding();
 }
 function showLogin(){
   document.getElementById("appShell").style.display = "none";
@@ -3778,6 +3819,8 @@ function showLogin(){
   document.getElementById("adminEmailInput").value = "";
   document.getElementById("adminPasswordInput").value = "";
   ["btnAdminLogin","btnVolunteerLogin","btnParticipantLogin"].forEach(bid=> document.getElementById(bid).classList.remove("primary"));
+  if(DIRECT_ATHLETE_MODE) DB.currentEventId = pickDefaultEventId();
+  populateLoginEventSelect();
   const vs = document.getElementById("volunteerSelect");
   vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
   const divFilter = document.getElementById("participantDivisionFilter");
@@ -3788,13 +3831,7 @@ function showLogin(){
     document.getElementById("roleBtns").style.display = "none";
     document.getElementById("adminLoginWrap").style.display = "none";
     document.getElementById("loginCard").classList.add("athlete-mode");
-    // Event names are typically "HYROX Simulation — August 9" — split so the
-    // date gets its own compact badge instead of wrapping awkwardly in the h1.
-    const nameParts = curEvent().name.split(/\s+[-\u2013\u2014]\s+/).map(s=>s.trim());
-    document.getElementById("loginTitle").textContent = "🏁 " + (nameParts[0] || curEvent().name);
-    const badge = document.getElementById("loginEventBadge");
-    if(nameParts[1]){ badge.textContent = nameParts[1]; badge.classList.remove("hidden"); }
-    else { badge.classList.add("hidden"); }
+    applyAthleteModeBranding();
     document.getElementById("loginSubtitle").textContent = "Find your heat time";
     document.getElementById("participantPicker").classList.remove("hidden");
   }
@@ -3886,6 +3923,16 @@ document.getElementById("btnParticipantLogin").addEventListener("click", ()=>{
 });
 document.getElementById("participantSearchInput").addEventListener("input", renderParticipantResults);
 document.getElementById("participantDivisionFilter").addEventListener("change", renderParticipantResults);
+document.getElementById("loginEventSelect").addEventListener("change", (e)=>{
+  // Just picking which event's roster/volunteers to search -- never blocked
+  // by an event lock, same as the admin event-switcher in Settings.
+  DB.currentEventId = e.target.value;
+  saveDB(true, true, true);
+  const vs = document.getElementById("volunteerSelect");
+  if(vs) vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
+  renderParticipantResults();
+  applyAthleteModeBranding();
+});
 document.getElementById("btnSwitchUser").addEventListener("click", logout);
 document.getElementById("btnNewEvent").addEventListener("click", ()=>{
   const name = prompt("New event name:", "HYROX Simulation — "); if(!name) return;
