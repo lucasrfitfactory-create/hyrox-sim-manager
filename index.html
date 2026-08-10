@@ -1201,9 +1201,12 @@ function renderAll(){
   if(!isMobileRole){ renderEventSelect(); renderTabsNav(); }
   document.getElementById("btnNewEvent").style.display = isFullAdmin() ? "" : "none";
   document.getElementById("eventSelect").disabled = !isFullAdmin();
+  // Locking is an admin/operational concept -- an athlete or volunteer
+  // just looking up their own read-only info doesn't need to know or care
+  // that the event is frozen, so the banner is admin/staff-only.
   const lockBanner = document.getElementById("lockBanner");
   const lockedEv = curEvent();
-  if(lockedEv && lockedEv.locked){
+  if(!isMobileRole && lockedEv && lockedEv.locked){
     lockBanner.style.display = "";
     lockBanner.textContent = `🔒 "${lockedEv.name}" is locked — nothing can be changed until an admin unlocks it in Settings.`;
   } else {
@@ -3772,7 +3775,7 @@ function renderParticipantView(main){
    LOGIN / LOGOUT
    ========================================================================= */
 function logout(){
-  DB.role=null; DB.currentVolunteerId=null; DB.currentParticipantId=null; saveDB(false, true);
+  DB.role=null; DB.currentVolunteerId=null; DB.currentParticipantId=null; saveDB(false, true, true);
   if(CLOUD_ENABLED && firebase.auth().currentUser){ firebase.auth().signOut(); }
   showLogin();
 }
@@ -3854,7 +3857,7 @@ function renderParticipantResults(){
     + (list.length>capped.length ? `<div style="color:var(--muted);font-size:12px;text-align:center;padding:6px;">+${list.length-capped.length} more — keep typing to narrow it down</div>` : "");
   container.querySelectorAll("[data-pid]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
-      DB.role="participant"; DB.currentParticipantId = btn.dataset.pid; saveDB(true, true); enterApp();
+      DB.role="participant"; DB.currentParticipantId = btn.dataset.pid; saveDB(true, true, true); enterApp();
     });
   });
 }
@@ -3884,7 +3887,7 @@ function tryAdminLogin(){
   document.getElementById("adminPasswordError").style.display = "none";
   btn.disabled = true; btn.textContent = "Signing in…";
   firebase.auth().signInWithEmailAndPassword(email, pass)
-    .then(()=>{ DB.role="admin"; DB.adminTier = computeAdminTier(email); saveDB(true, true); enterApp(); })
+    .then(()=>{ DB.role="admin"; DB.adminTier = computeAdminTier(email); saveDB(true, true, true); enterApp(); })
     .catch((err)=>{ console.error("Admin sign-in failed", err); showError(); })
     .finally(()=>{ btn.disabled = false; btn.textContent = "Continue"; });
 }
@@ -3912,7 +3915,7 @@ document.getElementById("btnVolunteerLogin").addEventListener("click", ()=>{
   document.getElementById("volunteerPicker").classList.remove("hidden");
 });
 document.getElementById("btnVolunteerContinue").addEventListener("click", ()=>{
-  DB.role="volunteer"; DB.currentVolunteerId = document.getElementById("volunteerSelect").value; saveDB(true, true); enterApp();
+  DB.role="volunteer"; DB.currentVolunteerId = document.getElementById("volunteerSelect").value; saveDB(true, true, true); enterApp();
 });
 document.getElementById("btnParticipantLogin").addEventListener("click", ()=>{
   setActiveRoleButton("btnParticipantLogin");
@@ -4008,7 +4011,7 @@ if(DIRECT_STARTLIST_MODE){
   // enforcement is the Firestore security rule requiring request.auth.
   showLogin();
   firebase.auth().onAuthStateChanged(user=>{
-    if(user){ DB.adminTier = computeAdminTier(user.email); enterApp(); } else { DB.role=null; saveDB(false, true); showLogin(); }
+    if(user){ DB.adminTier = computeAdminTier(user.email); enterApp(); } else { DB.role=null; saveDB(false, true, true); showLogin(); }
   });
 } else if(DB.role){
   enterApp();
