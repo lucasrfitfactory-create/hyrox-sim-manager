@@ -237,6 +237,8 @@ tr:hover td{background:var(--bg3);}
 
   <nav class="tabs" id="tabsNav"></nav>
 
+  <div id="lockBanner" style="display:none;background:var(--orange-bg);border-bottom:2px solid var(--orange);color:var(--orange);font-weight:700;font-size:13px;padding:8px 16px;text-align:center;"></div>
+
   <main id="mainContent"></main>
 
   <footer class="statusbar">
@@ -437,10 +439,12 @@ function initCloudSync(){
       if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
+      snapshotGoodState();
       renderWhateverIsShowing();
     } else {
       // First device to connect seeds the cloud with whatever is stored locally.
       cloudDocRef.set({events: DB.events, updatedAt: firebase.firestore.FieldValue.serverTimestamp()});
+      snapshotGoodState();
     }
     initialCloudSyncDone = true;
     updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
@@ -453,6 +457,7 @@ function initCloudSync(){
       if(!DB.events[DB.currentEventId]) DB.currentEventId = Object.keys(DB.events)[0] || null;
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
+      snapshotGoodState();
       updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
       renderWhateverIsShowing();
     }, err=>{
@@ -516,6 +521,23 @@ let undoStack = [];
 let currentTab = "dashboard";
 let saveTimer = null;
 
+// Event locking: once ev.locked is true, saveDB()/saveResultChange() refuse
+// to persist any change to that event and snap the in-memory copy back to
+// lastGoodEventsSnapshot -- the last state actually confirmed by the
+// cloud (or localStorage in local-only mode). This is a single chokepoint
+// rather than guarding every one of the ~55 call sites that mutate an
+// event and then call saveDB(): those sites are left free to mutate their
+// local `ev` object same as always, but the mutation never sticks (and
+// gets visibly reverted) when the event is locked.
+let lastGoodEventsSnapshot = null;
+function snapshotGoodState(){ lastGoodEventsSnapshot = clone(DB.events); }
+function isCurEventLocked(){ const ev = curEvent(); return !!(ev && ev.locked); }
+function rejectLockedChange(){
+  alert("This event is locked — an admin needs to unlock it (Settings tab) before anything can be changed.");
+  if(lastGoodEventsSnapshot) DB.events = clone(lastGoodEventsSnapshot);
+  renderWhateverIsShowing();
+}
+
 function defaultEvent(name, dateStr){
   return {
     id: uid(), name: name, date: dateStr,
@@ -539,17 +561,19 @@ function loadDB(){
     DB = { events: {[ev.id]: ev}, currentEventId: ev.id, role: null, currentVolunteerId: null, currentParticipantId: null };
   }
 }
-function saveDB(immediate, skipCloud){
+function saveDB(immediate, skipCloud, bypassLock){
   clearTimeout(saveTimer);
+  if(!bypassLock && !applyingRemoteUpdate && isCurEventLocked()){ rejectLockedChange(); return; }
   const doSave = ()=>{
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
     if(CLOUD_ENABLED && cloudDocRef && !skipCloud && !applyingRemoteUpdate && initialCloudSyncDone){
       updateSyncBadge("Syncing…");
       cloudDocRef.set({events: DB.events, updatedAt: firebase.firestore.FieldValue.serverTimestamp()})
-        .then(()=> updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString()))
+        .then(()=>{ updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString()); snapshotGoodState(); })
         .catch(()=> updateSyncBadge("Cloud sync failed — check connection (saved locally)"));
     } else if(!CLOUD_ENABLED){
       updateSyncBadge("Saved locally · " + new Date().toLocaleTimeString());
+      snapshotGoodState();
     }
   };
   if(!CLOUD_ENABLED) updateSyncBadge("Saving…");
@@ -563,6 +587,28 @@ function undo(){
   if(!undoStack.length) return;
   DB.events[DB.currentEventId] = undoStack.pop();
   saveDB(); renderAll();
+}
+// Lock/unlock a specific event by id (not necessarily the current one --
+// the Settings > Events table can lock any event in the list). Both go
+// through saveDB(..., true) with bypassLock=true: without that, setting
+// locked=true would itself get rejected by the very guard it's turning on.
+function lockEvent(eventId){
+  const ev = DB.events[eventId]; if(!ev) return;
+  if(ev.locked){ alert("Already locked."); return; }
+  if(!confirm(`Lock "${ev.name}" (${ev.date})? Once locked, nothing in this event -- results, schedule, participants, stations, volunteers, everything -- can be changed by anyone until an admin unlocks it.`)) return;
+  ev.locked = true;
+  saveDB(true, false, true);
+  renderAll();
+}
+function unlockEvent(eventId){
+  const ev = DB.events[eventId]; if(!ev) return;
+  if(!ev.locked) return;
+  const typed = prompt(`Type UNLOCK to confirm unlocking "${ev.name}". This allows edits again for everyone.`);
+  if(typed===null) return;
+  if(typed.trim().toUpperCase()!=="UNLOCK"){ alert("Didn't match \"UNLOCK\" — event stays locked."); return; }
+  ev.locked = false;
+  saveDB(true, false, true);
+  renderAll();
 }
 function curEvent(){ return DB.events[DB.currentEventId]; }
 
@@ -1133,6 +1179,14 @@ function renderAll(){
   if(!isMobileRole){ renderEventSelect(); renderTabsNav(); }
   document.getElementById("btnNewEvent").style.display = isFullAdmin() ? "" : "none";
   document.getElementById("eventSelect").disabled = !isFullAdmin();
+  const lockBanner = document.getElementById("lockBanner");
+  const lockedEv = curEvent();
+  if(lockedEv && lockedEv.locked){
+    lockBanner.style.display = "";
+    lockBanner.textContent = `🔒 "${lockedEv.name}" is locked — nothing can be changed until an admin unlocks it in Settings.`;
+  } else {
+    lockBanner.style.display = "none";
+  }
   const main = document.getElementById("mainContent");
   if(DB.role==="volunteer"){ main.innerHTML=""; renderMobileVolunteerView(main); return; }
   if(DB.role==="participant"){ main.innerHTML=""; renderParticipantView(main); return; }
@@ -2402,17 +2456,20 @@ function renderSettingsTab(main){
     </div>` : ""}
 
     <div class="card">
-      <div class="section-title"><h3>Events</h3>${help("Every event this app knows about, across all your simulation dates. Deleting an event permanently removes its participants, volunteers, heats, and assignments from the shared cloud database — there's no recycle bin.")}</div>
+      <div class="section-title"><h3>Events</h3>${help("Every event this app knows about, across all your simulation dates. Deleting an event permanently removes its participants, volunteers, heats, and assignments from the shared cloud database — there's no recycle bin. Locking an event blocks every kind of change to it -- results, schedule, participants, stations, volunteers -- for everyone, until an admin unlocks it (typing UNLOCK to confirm). Good for freezing an event once it's fully wrapped up, so nothing can drift hours later from a stray click on a tab someone forgot open.")}</div>
       <div class="toolbar"><button class="primary" id="btnSettingsNewEvent">+ New Event</button></div>
       <table>
         <tr><th>Event</th><th>Date</th><th></th></tr>
         ${events.map(e=>`<tr>
-          <td>${e.id===DB.currentEventId?'<span class="badge green">Current</span> ':''}${esc(e.name)}</td>
+          <td>${e.id===DB.currentEventId?'<span class="badge green">Current</span> ':''}${esc(e.name)} ${e.locked?'<span class="badge orange">🔒 Locked</span>':''}</td>
           <td>${esc(e.date)}</td>
           <td style="display:flex;gap:6px;">
-            <button class="small" data-rename="${e.id}">Rename</button>
+            <button class="small" data-rename="${e.id}" ${e.locked?'disabled title="Locked — unlock first"':''}>Rename</button>
             <button class="small" data-switch="${e.id}" ${e.id===DB.currentEventId?'disabled':''}>Switch to</button>
-            <button class="small danger" data-delete="${e.id}" ${events.length<=1?'disabled title="Cannot delete the only event"':''}>Delete</button>
+            ${e.locked
+              ? `<button class="small" data-unlock="${e.id}">🔓 Unlock</button>`
+              : `<button class="small" data-lock="${e.id}">🔒 Lock</button>`}
+            <button class="small danger" data-delete="${e.id}" ${(events.length<=1||e.locked)?'disabled title="'+(e.locked?'Locked — unlock first':'Cannot delete the only event')+'"':''}>Delete</button>
           </td>
         </tr>`).join("")}
       </table>
@@ -2530,24 +2587,38 @@ function renderSettingsTab(main){
     reader.readAsText(file);
   });
   document.querySelectorAll("[data-switch]").forEach(b=>{
-    b.addEventListener("click", ()=>{ DB.currentEventId = b.dataset.switch; saveDB(); renderAll(); });
+    // Viewing a locked event is always fine -- only editing it isn't --
+    // so this bypasses the lock guard rather than tripping it just for
+    // switching which event's data is currently on screen.
+    b.addEventListener("click", ()=>{ DB.currentEventId = b.dataset.switch; saveDB(undefined, undefined, true); renderAll(); });
+  });
+  document.querySelectorAll("[data-lock]").forEach(b=>{
+    b.addEventListener("click", ()=> lockEvent(b.dataset.lock));
+  });
+  document.querySelectorAll("[data-unlock]").forEach(b=>{
+    b.addEventListener("click", ()=> unlockEvent(b.dataset.unlock));
   });
   document.querySelectorAll("[data-rename]").forEach(b=>{
     b.addEventListener("click", ()=>{
       const ev = DB.events[b.dataset.rename];
+      if(ev.locked){ alert("This event is locked — unlock it first."); return; }
       const name = prompt("Event name:", ev.name);
       if(!name) return;
-      ev.name = name; saveDB(); renderAll();
+      // Lock-checked against this specific event above, not curEvent() --
+      // bypasses the generic guard so renaming event B doesn't get rejected
+      // just because currently-viewed event A happens to be locked.
+      ev.name = name; saveDB(undefined, undefined, true); renderAll();
     });
   });
   document.querySelectorAll("[data-delete]").forEach(b=>{
     b.addEventListener("click", ()=>{
       const ev = DB.events[b.dataset.delete];
+      if(ev.locked){ alert("This event is locked — unlock it first."); return; }
       if(Object.keys(DB.events).length<=1){ alert("Can't delete the only event."); return; }
       if(!confirm(`Permanently delete "${ev.name}"? This removes all its participants, volunteers, heats, and results. This cannot be undone.`)) return;
       delete DB.events[b.dataset.delete];
       if(DB.currentEventId===b.dataset.delete) DB.currentEventId = Object.keys(DB.events)[0];
-      saveDB(); renderAll();
+      saveDB(undefined, undefined, true); renderAll();
     });
   });
 }
@@ -2633,6 +2704,7 @@ function resetHeatStart(heatId){
 // whatever the server's copy actually is right now -- so a result written
 // a second ago by another laptop is never clobbered.
 function saveResultChange(mutate){
+  if(isCurEventLocked()){ rejectLockedChange(); return; }
   mutate(curEvent());
   renderAll();
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
@@ -2644,13 +2716,19 @@ function saveResultChange(mutate){
       const data = (snap.exists && snap.data()) ? snap.data() : null;
       const serverEvents = clone((data && data.events) ? data.events : DB.events);
       const serverEvent = serverEvents[eventId] || clone(curEvent());
+      // Guards against the narrow window where another admin locks the
+      // event after this device's optimistic local mutate() already ran
+      // but before this transaction's own fresh read landed.
+      if(serverEvent.locked) throw new Error("EVENT_LOCKED");
       mutate(serverEvent);
       serverEvents[eventId] = serverEvent;
       tx.set(cloudDocRef, {events: serverEvents, updatedAt: firebase.firestore.FieldValue.serverTimestamp()});
     });
   }).then(()=>{
     updateSyncBadge("Synced to cloud · " + new Date().toLocaleTimeString());
+    snapshotGoodState();
   }).catch(err=>{
+    if(err && err.message==="EVENT_LOCKED"){ rejectLockedChange(); return; }
     console.error("Transactional save failed", err);
     updateSyncBadge("Cloud sync failed — check connection (saved locally)");
   });
@@ -3839,6 +3917,7 @@ document.addEventListener("keydown", (e)=>{
    INIT
    ========================================================================= */
 loadDB();
+snapshotGoodState();
 if(DIRECT_STARTLIST_MODE){
   // Public TV/signage display — no login screen, no admin/volunteer state.
   renderStartListTV();
