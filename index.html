@@ -440,7 +440,7 @@ function initCloudSync(){
     if(snap.exists && snap.data() && snap.data().events){
       applyingRemoteUpdate = true;
       DB.events = snap.data().events;
-      if(!DB.events[DB.currentEventId]) DB.currentEventId = pickDefaultEventId();
+      if(!DB.events[DB.currentEventId]) DB.currentEventId = DIRECT_ATHLETE_MODE ? pickUpcomingEventId() : pickMostRecentEventId();
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       snapshotGoodState();
@@ -458,7 +458,7 @@ function initCloudSync(){
       if(!data || !data.events) return;
       applyingRemoteUpdate = true;
       DB.events = data.events;
-      if(!DB.events[DB.currentEventId]) DB.currentEventId = pickDefaultEventId();
+      if(!DB.events[DB.currentEventId]) DB.currentEventId = DIRECT_ATHLETE_MODE ? pickUpcomingEventId() : pickMostRecentEventId();
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       snapshotGoodState();
@@ -564,18 +564,34 @@ function loadDB(){
     seedDemoData(ev);
     DB = { events: {[ev.id]: ev}, currentEventId: ev.id, role: null, currentVolunteerId: null, currentParticipantId: null };
   }
-  if(DB.events && !DB.events[DB.currentEventId]) DB.currentEventId = pickDefaultEventId();
+  if(DB.events && !DB.events[DB.currentEventId]) DB.currentEventId = pickMostRecentEventId();
 }
-// Picks a sensible event to land on when a device's currentEventId is
-// missing/invalid (new visitor, cleared storage, deleted event) -- the
-// soonest event that hasn't happened yet, or the most recent past one if
-// every event is already over. Object.keys(DB.events)[0] used to be the
-// fallback here, but key order for a Firestore map field isn't guaranteed
-// stable across reads, so a second event could silently become "first"
-// and every fresh visitor (e.g. the public athlete-lookup embed, whose
-// storage is routinely cleared by browsers in a cross-site iframe) would
-// land on the wrong one at random.
-function pickDefaultEventId(){
+// Two different "which event should a fresh device land on" strategies --
+// they deliberately disagree once there's both a just-finished event and
+// a not-yet-run one, which is exactly the normal state between events:
+//
+// pickMostRecentEventId: the general-purpose fallback (TV/signage views,
+// admin, restore, delete) -- whichever event most recently happened, so a
+// leaderboard/results screen shows real data instead of a future event
+// that's still empty. Object.keys(DB.events)[0] used to be this fallback,
+// but key order for a Firestore map field isn't guaranteed stable across
+// reads, so a second event could silently become "first" and every fresh
+// visitor (a TV that doesn't persist localStorage, say) would land on the
+// wrong one at random.
+//
+// pickUpcomingEventId: used only by the athlete/volunteer "find your heat
+// time" login screen, which is explicitly forward-looking -- someone
+// hitting that link wants whichever event they're about to race in, not
+// whichever one just finished.
+function pickMostRecentEventId(){
+  const evs = Object.values(DB.events || {});
+  if(!evs.length) return null;
+  const todayStr = new Date().toISOString().slice(0,10);
+  const notFuture = evs.filter(e=>e.date<=todayStr).sort((a,b)=>b.date.localeCompare(a.date));
+  if(notFuture.length) return notFuture[0].id;
+  return evs.slice().sort((a,b)=>a.date.localeCompare(b.date))[0].id;
+}
+function pickUpcomingEventId(){
   const evs = Object.values(DB.events || {});
   if(!evs.length) return null;
   const todayStr = new Date().toISOString().slice(0,10);
@@ -2603,7 +2619,7 @@ function renderSettingsTab(main){
       document.getElementById("btnConfirmRestore").addEventListener("click", ()=>{
         if(!confirm(`Final check: this replaces the entire live database with the ${evList.length} event(s) shown above, for everyone, right now. This cannot be undone. Proceed?`)) return;
         DB.events = parsed.events;
-        if(!DB.events[DB.currentEventId]) DB.currentEventId = pickDefaultEventId();
+        if(!DB.events[DB.currentEventId]) DB.currentEventId = pickMostRecentEventId();
         saveDB(true);
         alert("Import complete — the live database has been replaced and is syncing to the cloud now.");
         renderAll();
@@ -2642,7 +2658,7 @@ function renderSettingsTab(main){
       if(Object.keys(DB.events).length<=1){ alert("Can't delete the only event."); return; }
       if(!confirm(`Permanently delete "${ev.name}"? This removes all its participants, volunteers, heats, and results. This cannot be undone.`)) return;
       delete DB.events[b.dataset.delete];
-      if(DB.currentEventId===b.dataset.delete) DB.currentEventId = pickDefaultEventId();
+      if(DB.currentEventId===b.dataset.delete) DB.currentEventId = pickMostRecentEventId();
       saveDB(undefined, undefined, true); renderAll();
     });
   });
@@ -3786,7 +3802,7 @@ function showLogin(){
   document.getElementById("adminEmailInput").value = "";
   document.getElementById("adminPasswordInput").value = "";
   ["btnAdminLogin","btnVolunteerLogin","btnParticipantLogin"].forEach(bid=> document.getElementById(bid).classList.remove("primary"));
-  if(DIRECT_ATHLETE_MODE) DB.currentEventId = pickDefaultEventId();
+  if(DIRECT_ATHLETE_MODE) DB.currentEventId = pickUpcomingEventId();
   populateLoginEventSelect();
   const vs = document.getElementById("volunteerSelect");
   vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
