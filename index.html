@@ -3275,7 +3275,10 @@ function nextEventAfter(ev){
   if(!others.length) return null;
   return others.sort((a,b)=>a.date.localeCompare(b.date))[0];
 }
-function lbNameKey(n){ return (n||"").trim().toLowerCase().replace(/\s+/g,' '); }
+// Strips notes like "Loiero (FULL KM)" down to "loiero" before comparing --
+// real data has these baked right into the name field, and without this a
+// clean re-signup for the next event would never match its annotated self.
+function lbNameKey(n){ return (n||"").replace(/\([^)]*\)/g,'').trim().toLowerCase().replace(/\s+/g,' '); }
 // Every name a participant answers to for matching purposes: their own,
 // plus each of their doubles partner's (partnerNames is a free-text,
 // comma-separated field -- see teamLabel/athleteCount). Checking every
