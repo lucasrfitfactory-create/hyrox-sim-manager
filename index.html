@@ -3317,6 +3317,47 @@ function renderLeaderboardTV(){
         : `<div style="text-align:center;color:${TV_YELLOW};font-size:2em;font-weight:800;padding:40px 0;">🏁 Final results are in — thanks for racing!</div>`}
     </div>
   `;
+  startLbAutoScroll();
+}
+// Nobody's holding a mouse at a TV, so the page has to scroll itself: pause
+// at the top, glide down to the bottom, pause there, jump back and repeat
+// -- forever, so every division is eventually visible with no interaction.
+// The whole cycle is budgeted to finish inside LB_AUTOSCROLL_CYCLE_MS,
+// comfortably under the 60s periodic re-render below (which replaces the
+// whole page and would otherwise cut a slower scroll off before it ever
+// reached the bottom) -- so scroll speed adapts to however much content
+// there is rather than being a fixed px/sec that only worked by accident
+// for whatever roster size happened to be tested.
+let lbAutoScrollHandle = null;
+function startLbAutoScroll(){
+  // setInterval rather than requestAnimationFrame -- rAF is throttled/fully
+  // paused by the browser whenever it thinks the page isn't visible, which
+  // is the wrong assumption for signage hardware/embedded kiosk browsers
+  // that may not reliably report themselves as "visible" the way a normal
+  // foreground desktop tab does.
+  if(lbAutoScrollHandle) clearInterval(lbAutoScrollHandle);
+  const LB_AUTOSCROLL_CYCLE_MS = 50000;
+  const PAUSE_MS = 4000;
+  const TICK_MS = 50;
+  let t0 = performance.now();
+  let scrollable = document.body.scrollHeight - window.innerHeight;
+  let scrollDurationMs = Math.max(4000, LB_AUTOSCROLL_CYCLE_MS - PAUSE_MS*2);
+  lbAutoScrollHandle = setInterval(()=>{
+    // Re-measured every tick, not just once per cycle -- if results come in
+    // mid-scroll the page grows taller, and a stale `scrollable` captured
+    // at cycle start would either stop short of the new bottom or (if it
+    // shrank) try to scroll past the real max.
+    scrollable = document.body.scrollHeight - window.innerHeight;
+    if(scrollable <= 10){ window.scrollTo(0,0); return; }
+    const elapsed = (performance.now() - t0) % (PAUSE_MS*2 + scrollDurationMs);
+    if(elapsed < PAUSE_MS){
+      window.scrollTo(0, 0);
+    } else if(elapsed < PAUSE_MS + scrollDurationMs){
+      window.scrollTo(0, scrollable * (elapsed-PAUSE_MS) / scrollDurationMs);
+    } else {
+      window.scrollTo(0, scrollable);
+    }
+  }, TICK_MS);
 }
 
 /* =========================================================================
