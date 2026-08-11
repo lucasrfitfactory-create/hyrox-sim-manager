@@ -3267,6 +3267,43 @@ function renderStartListTV(){
    stacked in this fixed order: Men's Doubles, Mixed Doubles, Women's
    Doubles, Men's Solo, Women's Solo.
    ========================================================================= */
+// Finds whichever OTHER event comes chronologically right after `ev` --
+// used so the leaderboard can point out "hey, this person's already
+// signed up for the next one," without hardcoding which event that is.
+function nextEventAfter(ev){
+  const others = Object.values(DB.events).filter(e=>e.id!==ev.id && e.date>ev.date);
+  if(!others.length) return null;
+  return others.sort((a,b)=>a.date.localeCompare(b.date))[0];
+}
+function lbNameKey(n){ return (n||"").trim().toLowerCase().replace(/\s+/g,' '); }
+// Every name a participant answers to for matching purposes: their own,
+// plus each of their doubles partner's (partnerNames is a free-text,
+// comma-separated field -- see teamLabel/athleteCount). Checking every
+// name on both sides is what makes this work across a division change
+// between events: a solo racer who signed up as part of a duo next time
+// (or vice versa) still matches on whichever name lines up.
+function lbAllNames(p){
+  const names = [fullName(p)];
+  if(p.partnerNames) names.push(...p.partnerNames.split(",").map(s=>s.trim()).filter(Boolean));
+  return names;
+}
+function buildNextEventSignupIndex(nextEv){
+  const idx = new Map();
+  activeParticipants(nextEv).forEach(p=>{
+    lbAllNames(p).forEach(n=>{
+      const key = lbNameKey(n);
+      if(key && !idx.has(key)) idx.set(key, p);
+    });
+  });
+  return idx;
+}
+function findNextEventSignup(p, idx){
+  for(const n of lbAllNames(p)){
+    const match = idx.get(lbNameKey(n));
+    if(match) return match;
+  }
+  return null;
+}
 function renderLeaderboardTV(){
   const ev = curEvent();
   if(!ev){
@@ -3282,6 +3319,9 @@ function renderLeaderboardTV(){
   // Doubles, Men's Solo, Women's Solo.
   const lbDivisions = DIVISIONS.filter(d=>d!=="Relay");
   const fontScale = 1.2;
+  const nextEv = nextEventAfter(ev);
+  const nextEvSignupIndex = nextEv ? buildNextEventSignupIndex(nextEv) : null;
+  const nextEvShortDate = nextEv ? fmtShortDate(nextEv.date) : "";
 
   function divCardHtml(div){
     const list = rows.filter(r=>r.participant.division===div).sort((a,b)=>a.elapsedMs-b.elapsedMs);
@@ -3290,11 +3330,18 @@ function renderLeaderboardTV(){
     // edge of the now full-width stacked card, while still lining up in a
     // clean vertical column across every row regardless of name length.
     const rowsHtml = list.length
-      ? list.map((r,i)=>`<div style="display:flex;align-items:center;gap:${8*fontScale}px;padding:${5*fontScale}px 0;border-bottom:1px solid var(--border);">
+      ? list.map((r,i)=>{
+          const signup = nextEvSignupIndex ? findNextEventSignup(r.participant, nextEvSignupIndex) : null;
+          const signupHtml = signup
+            ? `<span style="margin-left:auto;font-size:${0.95*fontScale}em;font-weight:700;color:${TV_YELLOW};background:rgba(255,212,0,0.12);border:1px solid rgba(255,212,0,0.4);border-radius:999px;padding:${4*fontScale}px ${14*fontScale}px;white-space:nowrap;">🔁 Signed up for ${esc(nextEvShortDate)} — ${esc(signup.division)}</span>`
+            : "";
+          return `<div style="display:flex;align-items:center;gap:${8*fontScale}px;padding:${5*fontScale}px 0;border-bottom:1px solid var(--border);">
           <span style="font-size:${1.25*fontScale}em;width:${1.8*fontScale}em;text-align:center;flex-shrink:0;">${medals[i]||(i+1)}</span>
           <span style="font-size:${1.3*fontScale}em;font-weight:600;overflow-wrap:break-word;word-break:break-word;white-space:normal;line-height:1.15;width:${480*fontScale}px;flex-shrink:0;">${esc(teamLabel(r.participant))}</span>
           <span style="font-size:${1.25*fontScale}em;font-weight:800;font-variant-numeric:tabular-nums;color:${TV_YELLOW};flex-shrink:0;white-space:nowrap;">${fmtElapsed(r.elapsedMs)}</span>
-        </div>`).join("")
+          ${signupHtml}
+        </div>`;
+        }).join("")
       : `<div style="color:var(--muted);font-size:${1*fontScale}em;padding:${8*fontScale}px 0;">No times yet</div>`;
     return `<div style="border:2px solid var(--border);background:var(--bg3);border-radius:10px;padding:${12*fontScale}px ${16*fontScale}px;">
       <div style="font-weight:800;font-size:${1.45*fontScale}em;color:${TV_YELLOW};margin-bottom:${6*fontScale}px;">${esc(div)}</div>
