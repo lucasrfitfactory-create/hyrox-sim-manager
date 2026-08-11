@@ -3242,14 +3242,14 @@ function renderStartListTV(){
 /* =========================================================================
    TV / SIGNAGE LEADERBOARD (?view=leaderboard) — public, no-login,
    read-only. Same per-division rankings as the Results tab's Leaderboard
-   view, but auto-scaled to fill exactly one screen (same fit-to-screen
-   technique as renderStartListTV) so athletes can see standings right
-   after finishing without the page needing to scroll.
+   view. Fixed 100vw-wide TV sizing, but deliberately NOT fit-to-one-screen
+   -- every division's full result list is shown, stacked one below the
+   other, and the page scrolls instead of shrinking text to cram everyone
+   onto a single viewport.
 
-   All 5 non-Relay divisions (Men's Doubles, Mixed Doubles, Women's
-   Doubles on the left; Men's Solo, Women's Solo on the right) stay on
-   screen for the whole event -- each card caps at its top 5 results with
-   a "+N more not shown" note rather than hiding the division entirely.
+   All 5 non-Relay divisions stay up for the whole event (no auto-hide),
+   stacked in this fixed order: Men's Doubles, Mixed Doubles, Women's
+   Doubles, Men's Solo, Women's Solo.
    ========================================================================= */
 function renderLeaderboardTV(){
   const ev = curEvent();
@@ -3260,20 +3260,15 @@ function renderLeaderboardTV(){
   const rows = getResultsWithMeta(ev);
   const medals = ["🥇","🥈","🥉"];
   // Relay isn't shown on this screen -- per Lucas, just the individual/
-  // doubles divisions matter for the finish-line leaderboard. All 5 stay up
-  // the whole event -- no auto-hide once a division wraps up.
+  // doubles divisions matter for the finish-line leaderboard. Filtering
+  // DIVISIONS (rather than listing divisions explicitly) keeps this in
+  // its fixed display order: Men's Doubles, Mixed Doubles, Women's
+  // Doubles, Men's Solo, Women's Solo.
   const lbDivisions = DIVISIONS.filter(d=>d!=="Relay");
-  // Design-only split into two columns, instead of one long stack. Which
-  // divisions show/hide is unchanged (still driven by lbDivisions above) --
-  // this only decides which side each visible division lands on.
-  const leftDivisions = lbDivisions.filter(d=>d==="Men's Doubles" || d==="Mixed Doubles" || d==="Women's Doubles");
-  const rightDivisions = lbDivisions.filter(d=>d==="Men's Solo" || d==="Women's Solo");
+  const fontScale = 1.2;
 
-  const LB_MAX_ROWS = 5;
-  function divCardHtml(div, fontScale){
-    const full = rows.filter(r=>r.participant.division===div).sort((a,b)=>a.elapsedMs-b.elapsedMs);
-    const list = full.slice(0, LB_MAX_ROWS);
-    const hiddenCount = full.length - list.length;
+  function divCardHtml(div){
+    const list = rows.filter(r=>r.participant.division===div).sort((a,b)=>a.elapsedMs-b.elapsedMs);
     // Name gets a fixed-width column (rather than flex:1 + space-between)
     // so the time sits right after the name instead of pinned to the far
     // edge of the now full-width stacked card, while still lining up in a
@@ -3285,58 +3280,27 @@ function renderLeaderboardTV(){
           <span style="font-size:${1.25*fontScale}em;font-weight:800;font-variant-numeric:tabular-nums;color:${TV_YELLOW};flex-shrink:0;white-space:nowrap;">${fmtElapsed(r.elapsedMs)}</span>
         </div>`).join("")
       : `<div style="color:var(--muted);font-size:${1*fontScale}em;padding:${8*fontScale}px 0;">No times yet</div>`;
-    const moreHtml = hiddenCount>0
-      ? `<div style="color:var(--muted);font-size:${0.95*fontScale}em;font-style:italic;padding:${6*fontScale}px 0 0;">+${hiddenCount} more not shown</div>`
-      : "";
     return `<div style="border:2px solid var(--border);background:var(--bg3);border-radius:10px;padding:${12*fontScale}px ${16*fontScale}px;">
       <div style="font-weight:800;font-size:${1.45*fontScale}em;color:${TV_YELLOW};margin-bottom:${6*fontScale}px;">${esc(div)}</div>
       ${rowsHtml}
-      ${moreHtml}
     </div>`;
   }
 
-  function render(fontScale){
-    document.body.innerHTML = `
-      <div style="min-height:100vh;background:var(--bg);color:var(--text);box-sizing:border-box;padding:3vh 3vw;font-family:inherit;display:flex;flex-direction:column;">
-        <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;margin-bottom:44px;">
-          <div style="display:flex;align-items:center;gap:14px;">
-            <img src="hyrox-logo.png" alt="HYROX" style="height:40px;width:auto;">
-            <div style="font-size:1.4em;font-weight:800;color:var(--muted);">${esc(fmtShortDate(ev.date))}</div>
-          </div>
-          <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:48px;width:auto;">
-          <div style="text-align:right;font-size:1.6em;font-weight:800;letter-spacing:2px;color:${TV_YELLOW};">LEADERBOARD</div>
+  document.body.innerHTML = `
+    <div style="min-height:100vh;width:100vw;box-sizing:border-box;background:var(--bg);color:var(--text);padding:3vh 3vw;font-family:inherit;">
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;margin-bottom:44px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <img src="hyrox-logo.png" alt="HYROX" style="height:40px;width:auto;">
+          <div style="font-size:1.4em;font-weight:800;color:var(--muted);">${esc(fmtShortDate(ev.date))}</div>
         </div>
-        <div id="lbGrid" style="${lbDivisions.length ? `display:grid;grid-template-columns:1fr 1fr;gap:${20*fontScale}px;align-items:start;` : ''}">
-          ${lbDivisions.length
-            ? `<div style="display:flex;flex-direction:column;gap:${12*fontScale}px;">${leftDivisions.map(d=>divCardHtml(d, fontScale)).join("")}</div>
-               <div style="display:flex;flex-direction:column;gap:${12*fontScale}px;">${rightDivisions.map(d=>divCardHtml(d, fontScale)).join("")}</div>`
-            : `<div style="text-align:center;color:${TV_YELLOW};font-size:${2*fontScale}em;font-weight:800;padding:${40*fontScale}px 0;">🏁 Final results are in — thanks for racing!</div>`}
-        </div>
+        <img src="${TV_LOGO_URL}" alt="Fit Factory" style="height:48px;width:auto;">
+        <div style="text-align:right;font-size:1.6em;font-weight:800;letter-spacing:2px;color:${TV_YELLOW};">LEADERBOARD</div>
       </div>
-    `;
-  }
-
-  // Same "start generous, then settle to whatever actually fills the
-  // screen" loop as the start list TV view -- grows cards up when there's
-  // spare room, shrinks them down when they overflow.
-  let fontScale = 1.1;
-  render(fontScale);
-  for(let i=0;i<6;i++){
-    const contentH = document.body.scrollHeight;
-    const availH = window.innerHeight;
-    // availH can read 0 for a frame right after navigation, before layout
-    // settles -- skip the correction rather than let a bogus reading
-    // collapse fontScale to its floor with no way back.
-    if(!availH || Math.abs(contentH-availH) <= 6) break;
-    let ratio = availH / contentH;
-    ratio = 1 + (ratio-1)*0.85; // damp so it converges instead of oscillating
-    // Capped lower than other TV views: past ~1.6 the name column starts
-    // squeezing itself narrower than a normal name/time pair needs, which
-    // was truncating long names ("Ivan Ho & pa..."). Wrapping (above) is
-    // the real safety net, but keeping the cap sane avoids relying on it.
-    fontScale = Math.min(1.6, Math.max(0.4, fontScale * ratio));
-    render(fontScale);
-  }
+      ${lbDivisions.length
+        ? `<div style="display:flex;flex-direction:column;gap:${16*fontScale}px;">${lbDivisions.map(d=>divCardHtml(d)).join("")}</div>`
+        : `<div style="text-align:center;color:${TV_YELLOW};font-size:2em;font-weight:800;padding:40px 0;">🏁 Final results are in — thanks for racing!</div>`}
+    </div>
+  `;
 }
 
 /* =========================================================================
