@@ -3383,9 +3383,12 @@ function renderLeaderboardTV(){
         ? `<div style="display:flex;flex-direction:column;gap:${16*fontScale}px;">${lbDivisions.map(d=>divCardHtml(d)).join("")}</div>`
         : `<div style="text-align:center;color:${TV_YELLOW};font-size:2em;font-weight:800;padding:40px 0;">🏁 Final results are in — thanks for racing!</div>`}
     </div>
-    <div style="position:fixed;bottom:24px;right:24px;z-index:10;background:#fff;border-radius:16px;padding:14px;box-shadow:0 4px 20px rgba(0,0,0,0.4);">
-      <img src="qr-code.png" alt="Scan for the next event" style="display:block;width:180px;height:180px;">
-    </div>
+    ${nextEv ? `<div style="position:fixed;bottom:3vh;right:3vw;z-index:10;display:flex;flex-direction:column;align-items:center;gap:10px;">
+      <div style="background:${TV_YELLOW};color:#1a1300;font-weight:800;font-size:1.1em;letter-spacing:0.3px;padding:9px 20px;border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,0.35);white-space:nowrap;">🎟️ Get your ticket for ${esc(nextEvShortDate)}</div>
+      <div style="background:#fff;border-radius:18px;padding:16px;box-shadow:0 4px 20px rgba(0,0,0,0.4);">
+        <img src="qr-code.png" alt="Scan for ${esc(nextEvShortDate)}" style="display:block;width:220px;height:220px;">
+      </div>
+    </div>` : ""}
   `;
   startLbAutoScroll();
 }
