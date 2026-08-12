@@ -1712,24 +1712,37 @@ function reactivateParticipant(id){
   saveDB(); renderAll();
 }
 
+// Looks a value up by trying several header spellings, case/spacing-
+// insensitive -- a spreadsheet built for this import (e.g. matching
+// against an orders export to fill in Division/Member/Payment) very
+// reasonably uses short headers like "Member" or "Payment" rather than
+// this app's exact "Member Status"/"Payment Status", and matching only
+// the exact string used to silently fall back to a default ("Non-member",
+// "Pending") for every row instead of actually reading the column.
+function csvVal(row, ...names){
+  const wanted = names.map(n=>n.toLowerCase());
+  const key = Object.keys(row).find(k=>wanted.includes(k.trim().toLowerCase()));
+  return key!==undefined ? row[key] : undefined;
+}
 function handleCsvImport(e){
   const file = e.target.files[0]; if(!file) return;
   Papa.parse(file, {header:true, skipEmptyLines:true, complete: (res)=>{
     const ev = curEvent(); pushUndo();
     res.data.forEach(row=>{
+      const priceOverrideRaw = csvVal(row, "price override", "priceoverride");
       ev.participants.push({
         id: uid(),
-        firstName: row["First Name"]||row.firstName||"",
-        lastName: row["Last Name"]||row.lastName||"",
-        email: row["Email"]||row.email||"",
-        phone: row["Phone"]||row.phone||"",
-        memberStatus: row["Member Status"]||row.memberStatus||"Non-member",
-        division: row["Division"]||row.division||DIVISIONS[0],
-        partnerNames: row["Partner Names"]||row.partnerNames||"",
+        firstName: csvVal(row, "first name", "firstname")||"",
+        lastName: csvVal(row, "last name", "lastname")||"",
+        email: csvVal(row, "email")||"",
+        phone: csvVal(row, "phone")||"",
+        memberStatus: csvVal(row, "member status", "memberstatus", "member")||"Non-member",
+        division: csvVal(row, "division")||DIVISIONS[0],
+        partnerNames: csvVal(row, "partner names", "partnernames", "partner", "partners")||"",
         constraints: [],
-        discount: Number(row["Discount"]||row.discount)||0,
-        priceOverride: (row["Price Override"]||row.priceOverride)!==undefined && (row["Price Override"]||row.priceOverride)!=="" ? Number(row["Price Override"]||row.priceOverride) : null,
-        paymentStatus: row["Payment Status"]||row.paymentStatus||"Pending"
+        discount: Number(csvVal(row, "discount"))||0,
+        priceOverride: priceOverrideRaw!==undefined && priceOverrideRaw!=="" ? Number(priceOverrideRaw) : null,
+        paymentStatus: csvVal(row, "payment status", "paymentstatus", "payment")||"Pending"
       });
     });
     saveDB(); renderAll();
@@ -3336,7 +3349,11 @@ function renderLeaderboardTV(){
       ? list.map((r,i)=>{
           const signup = nextEvSignupIndex ? findNextEventSignup(r.participant, nextEvSignupIndex) : null;
           const signupHtml = signup
-            ? `<span style="margin-left:auto;font-size:${0.95*fontScale}em;font-weight:700;color:${TV_YELLOW};background:rgba(255,212,0,0.12);border:1px solid rgba(255,212,0,0.4);border-radius:999px;padding:${4*fontScale}px ${14*fontScale}px;white-space:nowrap;">🔁 Signed up for ${esc(nextEvShortDate)} — ${esc(signup.division)}</span>`
+            // Sits right after the time rather than pushed to the row's far
+            // right edge -- the fixed QR code overlay lives in that bottom-
+            // right corner, and a badge stretched all the way out there
+            // would end up hidden behind it.
+            ? `<span style="margin-left:${20*fontScale}px;font-size:${0.95*fontScale}em;font-weight:700;color:${TV_YELLOW};background:rgba(255,212,0,0.12);border:1px solid rgba(255,212,0,0.4);border-radius:999px;padding:${4*fontScale}px ${14*fontScale}px;white-space:nowrap;">🔁 Signed up for ${esc(nextEvShortDate)} — ${esc(signup.division)}</span>`
             : "";
           return `<div style="display:flex;align-items:center;gap:${8*fontScale}px;padding:${5*fontScale}px 0;border-bottom:1px solid var(--border);">
           <span style="font-size:${1.25*fontScale}em;width:${1.8*fontScale}em;text-align:center;flex-shrink:0;">${medals[i]||(i+1)}</span>
@@ -3365,6 +3382,9 @@ function renderLeaderboardTV(){
       ${lbDivisions.length
         ? `<div style="display:flex;flex-direction:column;gap:${16*fontScale}px;">${lbDivisions.map(d=>divCardHtml(d)).join("")}</div>`
         : `<div style="text-align:center;color:${TV_YELLOW};font-size:2em;font-weight:800;padding:40px 0;">🏁 Final results are in — thanks for racing!</div>`}
+    </div>
+    <div style="position:fixed;bottom:24px;right:24px;z-index:10;background:#fff;border-radius:16px;padding:14px;box-shadow:0 4px 20px rgba(0,0,0,0.4);">
+      <img src="qr-code.png" alt="Scan for the next event" style="display:block;width:180px;height:180px;">
     </div>
   `;
   startLbAutoScroll();
