@@ -416,6 +416,48 @@ if(CLOUD_ENABLED){
     cloudDocRef = firebase.firestore().collection("hyroxSim").doc("sharedState");
   }catch(e){ console.error("Firebase init failed", e); }
 }
+// A separate document per event (same "hyroxSim" collection as the main
+// shared doc, so it inherits the same security rules without needing a
+// new one) purely for finish-time history. It's written with
+// arrayUnion, which Firestore applies atomically on the server without
+// ever reading the client's copy of the array first -- unlike the main
+// document, a stale device can only ever ADD an entry here, never erase
+// one that's already there. That's the exact property the original bug
+// needed: even if a blind overwrite of the main event document happens
+// again (a bug we believe is now fixed, but this is the safety net for
+// "somehow it happens anyway"), the actual recorded times survive here.
+const FINISH_LOG_LOCAL_KEY = "hyroxFinishLogBackup_v1";
+function finishLogRef(eventId){
+  return (CLOUD_ENABLED && cloudDocRef && eventId) ? cloudDocRef.parent.doc("finishLog_"+eventId) : null;
+}
+function logFinishEvent(action, heatId, participantId, elapsedMs){
+  try{
+    const ev = curEvent(); if(!ev) return;
+    const p = ev.participants.find(x=>x.id===participantId);
+    const h = ev.heats.find(x=>x.id===heatId);
+    const entry = {
+      action, heatId, participantId,
+      participantName: p ? teamLabel(p) : participantId,
+      division: h ? h.division : null,
+      heatNumber: h ? h.heatNumberInDivision : null,
+      elapsedMs: (elapsedMs===undefined || elapsedMs===null) ? null : elapsedMs,
+      loggedAt: Date.now()
+    };
+    // Local backup first -- works even if this device is briefly offline
+    // right when it logs.
+    try{
+      let localLog = JSON.parse(localStorage.getItem(FINISH_LOG_LOCAL_KEY)||"[]");
+      localLog.push(Object.assign({eventId: DB.currentEventId}, entry));
+      if(localLog.length>1000) localLog = localLog.slice(-1000);
+      localStorage.setItem(FINISH_LOG_LOCAL_KEY, JSON.stringify(localLog));
+    }catch(e2){}
+    const ref = finishLogRef(DB.currentEventId);
+    if(ref){
+      ref.set({entries: firebase.firestore.FieldValue.arrayUnion(entry)}, {merge:true})
+        .catch(err=> console.error("Finish log cloud write failed (still saved locally)", err));
+    }
+  }catch(e){ console.error("logFinishEvent failed", e); }
+}
 function updateSyncBadge(text){
   const el = document.getElementById("saveStatus");
   if(el) el.textContent = text;
@@ -2540,6 +2582,15 @@ function renderSettingsTab(main){
     </div>
 
     <div class="card">
+      <div class="section-title"><h3>Finish Time Log</h3>${help("A separate, append-only record of every finish time as it's recorded (and every time one's undone), for the currently selected event. It's written independently from the main event data specifically so it survives even if the main data were ever wiped or overwritten -- a recovery safety net, not something you need to check day to day.")}</div>
+      <div class="toolbar">
+        <button class="small" id="btnLoadFinishLog">Load Log for Current Event</button>
+        <button class="small" id="btnDownloadFinishLog" style="display:none;">⬇ Download as JSON</button>
+      </div>
+      <div id="finishLogResult" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
       <div class="section-title"><h3>Restore from Backup</h3>${help("Loads a backup JSON file (from the Download Backup Now button above) and replaces the ENTIRE shared database with it — every event, not just the current one. Shows you exactly what's in the file first, so you can check it before anything is overwritten. There is no undo once you confirm this.")}</div>
       <div class="toolbar">
         <input type="file" id="restoreFileInput" accept="application/json,.json" style="display:none;">
@@ -2579,6 +2630,46 @@ function renderSettingsTab(main){
     };
     const stamp = new Date().toISOString().replace(/[:.]/g,"-");
     download(`hyrox-backup_${stamp}.json`, JSON.stringify(payload, null, 2), "application/json");
+  });
+  const loadLogBtn = document.getElementById("btnLoadFinishLog");
+  const downloadLogBtn = document.getElementById("btnDownloadFinishLog");
+  const finishLogResult = document.getElementById("finishLogResult");
+  let loadedFinishLogEntries = null;
+  if(loadLogBtn) loadLogBtn.addEventListener("click", ()=>{
+    const ref = finishLogRef(DB.currentEventId);
+    if(!ref){ finishLogResult.innerHTML = `<div style="color:var(--muted);font-size:13px;">Cloud sync isn't configured on this device.</div>`; return; }
+    loadLogBtn.disabled = true; loadLogBtn.textContent = "Loading…";
+    ref.get().then(snap=>{
+      loadLogBtn.disabled = false; loadLogBtn.textContent = "Load Log for Current Event";
+      const entries = (snap.exists && snap.data().entries) ? snap.data().entries.slice().sort((a,b)=>a.loggedAt-b.loggedAt) : [];
+      loadedFinishLogEntries = entries;
+      downloadLogBtn.style.display = entries.length ? "" : "none";
+      if(!entries.length){
+        finishLogResult.innerHTML = `<div style="color:var(--muted);font-size:13px;">No log entries yet for this event.</div>`;
+        return;
+      }
+      finishLogResult.innerHTML = `
+        <table>
+          <tr><th>Time</th><th>Action</th><th>Division / Heat</th><th>Participant</th><th>Elapsed</th></tr>
+          ${entries.map(e=>`<tr>
+            <td>${esc(new Date(e.loggedAt).toLocaleString())}</td>
+            <td>${e.action==="recorded"?"✅ Recorded":"↩️ Undone"}</td>
+            <td>${esc(e.division||"")}${e.heatNumber?` · Heat ${e.heatNumber}`:""}</td>
+            <td>${esc(e.participantName||e.participantId)}</td>
+            <td>${e.elapsedMs!=null?fmtElapsed(e.elapsedMs):"—"}</td>
+          </tr>`).join("")}
+        </table>
+      `;
+    }).catch(err=>{
+      loadLogBtn.disabled = false; loadLogBtn.textContent = "Load Log for Current Event";
+      console.error("Failed to load finish log", err);
+      finishLogResult.innerHTML = `<div style="color:var(--red);font-size:13px;">Couldn't load the log: ${esc(err.message||String(err))}</div>`;
+    });
+  });
+  if(downloadLogBtn) downloadLogBtn.addEventListener("click", ()=>{
+    if(!loadedFinishLogEntries) return;
+    const stamp2 = new Date().toISOString().replace(/[:.]/g,"-");
+    download(`hyrox-finish-log_${DB.currentEventId}_${stamp2}.json`, JSON.stringify(loadedFinishLogEntries, null, 2), "application/json");
   });
   const chooseRestoreBtn = document.getElementById("btnChooseRestoreFile");
   const restoreFileInput = document.getElementById("restoreFileInput");
@@ -2793,6 +2884,7 @@ function recordFinish(heatId, participantId){
   if(!h || !h.actualStartTs){ alert("This heat hasn't started yet."); return; }
   const now = Date.now();
   const newId = uid();
+  logFinishEvent("recorded", heatId, participantId, now - h.actualStartTs);
   saveResultChange(e=>{
     const eh = e.heats.find(x=>x.id===heatId);
     if(!eh || !eh.actualStartTs) return;
@@ -2804,6 +2896,9 @@ function recordFinish(heatId, participantId){
   });
 }
 function undoFinish(heatId, participantId){
+  const ev = curEvent();
+  const existing = (ev.results||[]).find(r=>r.heatId===heatId && r.participantId===participantId);
+  logFinishEvent("undone", heatId, participantId, existing ? existing.elapsedMs : null);
   saveResultChange(e=>{
     e.results = (e.results||[]).filter(r=>!(r.heatId===heatId && r.participantId===participantId));
   });
