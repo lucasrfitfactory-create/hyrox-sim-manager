@@ -362,6 +362,12 @@ const DIRECT_IPAD_MODE = new URLSearchParams(window.location.search).get("view")
    touches a result — so anyone can be handed this laptop without needing
    an admin login or any risk of them changing something. */
 const DIRECT_TVRESULTS_MODE = new URLSearchParams(window.location.search).get("view") === "tv-results";
+// Signage that's inherently about what's coming up (who's racing, when,
+// next heat) rather than reporting on results -- these should default a
+// fresh device to the soonest UPCOMING event, same as the athlete/
+// volunteer login, instead of the general "most recently held event"
+// fallback that's right for the leaderboard/finish-time/results screens.
+const FORWARD_LOOKING_VIEW = DIRECT_ATHLETE_MODE || DIRECT_STARTLIST_MODE || DIRECT_NEXTHEAT_MODE || DIRECT_IPAD_MODE;
 
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
@@ -478,7 +484,7 @@ function initCloudSync(){
     if(snap.exists && snap.data() && snap.data().events){
       applyingRemoteUpdate = true;
       DB.events = snap.data().events;
-      if(!DB.events[DB.currentEventId]) DB.currentEventId = DIRECT_ATHLETE_MODE ? pickUpcomingEventId() : pickMostRecentEventId();
+      if(!DB.events[DB.currentEventId]) DB.currentEventId = FORWARD_LOOKING_VIEW ? pickUpcomingEventId() : pickMostRecentEventId();
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       snapshotGoodState();
@@ -496,7 +502,7 @@ function initCloudSync(){
       if(!data || !data.events) return;
       applyingRemoteUpdate = true;
       DB.events = data.events;
-      if(!DB.events[DB.currentEventId]) DB.currentEventId = DIRECT_ATHLETE_MODE ? pickUpcomingEventId() : pickMostRecentEventId();
+      if(!DB.events[DB.currentEventId]) DB.currentEventId = FORWARD_LOOKING_VIEW ? pickUpcomingEventId() : pickMostRecentEventId();
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       snapshotGoodState();
