@@ -207,10 +207,6 @@ tr:hover td{background:var(--bg3);}
       <button class="primary" style="width:100%;margin-top:10px;" id="btnAdminContinue">Continue</button>
       <div id="adminPasswordError" style="color:var(--red);font-size:12px;margin-top:8px;display:none;">Incorrect email or password. Try again.</div>
     </div>
-    <div id="loginEventPicker" class="hidden" style="margin-top:12px;text-align:left;">
-      <label style="font-size:12px;color:var(--muted);font-weight:600;">Event</label>
-      <select id="loginEventSelect" style="width:100%;margin-top:6px;"></select>
-    </div>
     <div id="volunteerPicker" class="hidden">
       <label style="font-size:12px;color:var(--muted);font-weight:600;">Select your name</label>
       <select id="volunteerSelect"></select>
@@ -3975,13 +3971,6 @@ function logout(){
    data lands fail with "we couldn't find your registration" until they hit
    Switch User and reload the screen. This re-populates the picker's lists
    without resetting anything the visitor has already typed. */
-function populateLoginEventSelect(){
-  const sel = document.getElementById("loginEventSelect");
-  const picker = document.getElementById("loginEventPicker");
-  const evs = Object.values(DB.events).slice().sort((a,b)=>a.date.localeCompare(b.date));
-  picker.classList.toggle("hidden", evs.length<=1);
-  sel.innerHTML = evs.map(e=>`<option value="${e.id}" ${e.id===DB.currentEventId?'selected':''}>${esc(e.name)} (${esc(e.date)})</option>`).join("");
-}
 function applyAthleteModeBranding(){
   if(!DIRECT_ATHLETE_MODE) return;
   // Event names are typically "HYROX Simulation — August 9" — split so the
@@ -3995,7 +3984,10 @@ function applyAthleteModeBranding(){
 function refreshLoginScreenIfVisible(){
   if(DB.role) return; // already logged in — nothing to refresh
   if(document.getElementById("loginScreen").style.display === "none") return;
-  populateLoginEventSelect();
+  // Volunteer/Athlete login always targets the soonest upcoming event --
+  // no picker, no ambiguity, so a fresh data sync mid-visit can't leave
+  // this pointed at a stale/wrong event either.
+  DB.currentEventId = pickUpcomingEventId();
   const vs = document.getElementById("volunteerSelect");
   if(vs) vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
   renderParticipantResults();
@@ -4011,8 +4003,7 @@ function showLogin(){
   document.getElementById("adminEmailInput").value = "";
   document.getElementById("adminPasswordInput").value = "";
   ["btnAdminLogin","btnVolunteerLogin","btnParticipantLogin"].forEach(bid=> document.getElementById(bid).classList.remove("primary"));
-  if(DIRECT_ATHLETE_MODE) DB.currentEventId = pickUpcomingEventId();
-  populateLoginEventSelect();
+  DB.currentEventId = pickUpcomingEventId();
   const vs = document.getElementById("volunteerSelect");
   vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
   const divFilter = document.getElementById("participantDivisionFilter");
@@ -4115,16 +4106,6 @@ document.getElementById("btnParticipantLogin").addEventListener("click", ()=>{
 });
 document.getElementById("participantSearchInput").addEventListener("input", renderParticipantResults);
 document.getElementById("participantDivisionFilter").addEventListener("change", renderParticipantResults);
-document.getElementById("loginEventSelect").addEventListener("change", (e)=>{
-  // Just picking which event's roster/volunteers to search -- never blocked
-  // by an event lock, same as the admin event-switcher in Settings.
-  DB.currentEventId = e.target.value;
-  saveDB(true, true, true);
-  const vs = document.getElementById("volunteerSelect");
-  if(vs) vs.innerHTML = Object.values(curEvent().volunteers).map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("");
-  renderParticipantResults();
-  applyAthleteModeBranding();
-});
 document.getElementById("btnSwitchUser").addEventListener("click", logout);
 document.getElementById("btnNewEvent").addEventListener("click", ()=>{
   const name = prompt("New event name:", "HYROX Simulation — "); if(!name) return;
