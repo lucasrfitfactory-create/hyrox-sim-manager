@@ -484,7 +484,11 @@ function initCloudSync(){
     if(snap.exists && snap.data() && snap.data().events){
       applyingRemoteUpdate = true;
       DB.events = snap.data().events;
-      if(!DB.events[DB.currentEventId]) DB.currentEventId = FORWARD_LOOKING_VIEW ? pickUpcomingEventId() : pickMostRecentEventId();
+      if (FORWARD_LOOKING_VIEW) {
+  DB.currentEventId = pickUpcomingEventId();
+} else if (!DB.events[DB.currentEventId]) {
+  DB.currentEventId = pickMostRecentEventId();
+}
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       snapshotGoodState();
@@ -502,7 +506,11 @@ function initCloudSync(){
       if(!data || !data.events) return;
       applyingRemoteUpdate = true;
       DB.events = data.events;
-      if(!DB.events[DB.currentEventId]) DB.currentEventId = FORWARD_LOOKING_VIEW ? pickUpcomingEventId() : pickMostRecentEventId();
+      if (FORWARD_LOOKING_VIEW) {
+  DB.currentEventId = pickUpcomingEventId();
+} else if (!DB.events[DB.currentEventId]) {
+  DB.currentEventId = pickMostRecentEventId();
+}
       applyingRemoteUpdate = false;
       try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(e){}
       snapshotGoodState();
