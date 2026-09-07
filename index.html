@@ -50,7 +50,8 @@ h1,h2,h3,h4{margin:0 0 8px 0;font-weight:700;}
 
 /* ===== App Shell ===== */
 #appShell{display:none;flex-direction:column;min-height:100vh;}
-header.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:50;}
+.sticky-header{position:sticky;top:0;z-index:50;}
+header.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
 .brand{font-weight:800;letter-spacing:.5px;color:var(--accent);white-space:nowrap;}
 .event-switcher{display:flex;align-items:center;gap:6px;}
 .event-switcher select{max-width:220px;}
@@ -223,19 +224,21 @@ tr:hover td{background:var(--bg3);}
 
 <!-- ================= APP SHELL ================= -->
 <div id="appShell">
-  <header class="topbar">
-    <div class="brand">HYROX SIM</div>
-    <div class="event-switcher">
-      <select id="eventSelect"></select>
-      <button class="small" id="btnNewEvent" title="Create new event">+ New</button>
-    </div>
-    <input id="globalSearch" placeholder="Search everywhere… (press /)" class="no-print">
-    <div class="spacer"></div>
-    <span id="roleBadge" class="role-badge">ADMIN</span>
-    <button class="small ghost" id="btnSwitchUser">Switch user</button>
-  </header>
+  <div class="sticky-header">
+    <header class="topbar">
+      <div class="brand">HYROX SIM</div>
+      <div class="event-switcher">
+        <select id="eventSelect"></select>
+        <button class="small" id="btnNewEvent" title="Create new event">+ New</button>
+      </div>
+      <input id="globalSearch" placeholder="Search everywhere… (press /)" class="no-print">
+      <div class="spacer"></div>
+      <span id="roleBadge" class="role-badge">ADMIN</span>
+      <button class="small ghost" id="btnSwitchUser">Switch user</button>
+    </header>
 
-  <nav class="tabs" id="tabsNav"></nav>
+    <nav class="tabs" id="tabsNav"></nav>
+  </div>
 
   <div id="lockBanner" style="display:none;background:var(--orange-bg);border-bottom:2px solid var(--orange);color:var(--orange);font-weight:700;font-size:13px;padding:8px 16px;text-align:center;"></div>
 
