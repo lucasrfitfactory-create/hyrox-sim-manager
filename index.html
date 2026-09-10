@@ -336,6 +336,10 @@ const DIRECT_FINISHTIME_MODE = new URLSearchParams(window.location.search).get("
    get the room freed up instead of everything staying open and shrinking
    forever as the day goes on. */
 const DIRECT_LEADERBOARD_MODE = new URLSearchParams(window.location.search).get("view") === "leaderboard";
+// Second physical TV, same screen otherwise -- men's divisions live on
+// ?view=leaderboard, women's + mixed on ?view=leaderboard2 (see the
+// division filter inside renderLeaderboardTV).
+const DIRECT_LEADERBOARD2_MODE = new URLSearchParams(window.location.search).get("view") === "leaderboard2";
 
 /* ?view=nextheat — a dedicated, no-login, read-only TV/signage display for a
    big screen near the start line: a live countdown to the next heat (with
@@ -373,7 +377,7 @@ const DIRECT_TVRESULTS_MODE = new URLSearchParams(window.location.search).get("v
 // through and past race day (falling back to "most recent" again only
 // once a later event exists to be upcoming instead), the same way this
 // already works for the others below.
-const FORWARD_LOOKING_VIEW = DIRECT_ATHLETE_MODE || DIRECT_STARTLIST_MODE || DIRECT_NEXTHEAT_MODE || DIRECT_IPAD_MODE || DIRECT_LEADERBOARD_MODE;
+const FORWARD_LOOKING_VIEW = DIRECT_ATHLETE_MODE || DIRECT_STARTLIST_MODE || DIRECT_NEXTHEAT_MODE || DIRECT_IPAD_MODE || DIRECT_LEADERBOARD_MODE || DIRECT_LEADERBOARD2_MODE;
 
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
@@ -476,7 +480,7 @@ function updateSyncBadge(text){
 function renderWhateverIsShowing(){
   if(DIRECT_STARTLIST_MODE){ renderStartListTV(); return; }
   if(DIRECT_FINISHTIME_MODE){ renderFinishTimeTV(); return; }
-  if(DIRECT_LEADERBOARD_MODE){ renderLeaderboardTV(); return; }
+  if(DIRECT_LEADERBOARD_MODE || DIRECT_LEADERBOARD2_MODE){ renderLeaderboardTV(); return; }
   if(DIRECT_NEXTHEAT_MODE){ renderNextHeatTV(); return; }
   if(DIRECT_IPAD_MODE){ renderIpadTV(); return; }
   if(DIRECT_TVRESULTS_MODE){ renderTvResultsView(); return; }
@@ -3380,16 +3384,17 @@ function renderStartListTV(){
 }
 
 /* =========================================================================
-   TV / SIGNAGE LEADERBOARD (?view=leaderboard) — public, no-login,
-   read-only. Same per-division rankings as the Results tab's Leaderboard
-   view. Fixed 100vw-wide TV sizing, but deliberately NOT fit-to-one-screen
-   -- every division's full result list is shown, stacked one below the
-   other, and the page scrolls instead of shrinking text to cram everyone
-   onto a single viewport.
+   TV / SIGNAGE LEADERBOARD (?view=leaderboard / ?view=leaderboard2) —
+   public, no-login, read-only. Same per-division rankings as the Results
+   tab's Leaderboard view. Fixed 100vw-wide TV sizing, but deliberately
+   NOT fit-to-one-screen -- every division's full result list is shown,
+   stacked one below the other, and the page scrolls instead of shrinking
+   text to cram everyone onto a single viewport.
 
-   All 5 non-Relay divisions stay up for the whole event (no auto-hide),
-   stacked in this fixed order: Men's Doubles, Mixed Doubles, Women's
-   Doubles, Men's Solo, Women's Solo.
+   Split across two physical TVs: ?view=leaderboard shows Men's Doubles
+   and Men's Solo; ?view=leaderboard2 shows Mixed Doubles, Women's
+   Doubles, and Women's Solo (see lbAllowedDivisions below). Both stay up
+   for the whole event (no auto-hide), in DIVISIONS' own fixed order.
    ========================================================================= */
 // Finds whichever OTHER event comes chronologically right after `ev` --
 // used so the leaderboard can point out "hey, this person's already
@@ -3439,12 +3444,14 @@ function renderLeaderboardTV(){
   }
   const rows = getResultsWithMeta(ev);
   const medals = ["🥇","🥈","🥉"];
-  // Relay isn't shown on this screen -- per Lucas, just the individual/
-  // doubles divisions matter for the finish-line leaderboard. Filtering
-  // DIVISIONS (rather than listing divisions explicitly) keeps this in
-  // its fixed display order: Men's Doubles, Mixed Doubles, Women's
-  // Doubles, Men's Solo, Women's Solo.
-  const lbDivisions = DIVISIONS.filter(d=>d!=="Relay");
+  // Split across two physical TVs, same screen otherwise: men's divisions
+  // on ?view=leaderboard, women's + mixed on ?view=leaderboard2. Filtering
+  // DIVISIONS (rather than building the list by hand) keeps whichever
+  // subset applies in DIVISIONS' own fixed order.
+  const lbAllowedDivisions = DIRECT_LEADERBOARD2_MODE
+    ? ["Mixed Doubles","Women's Doubles","Women's Solo"]
+    : ["Men's Doubles","Men's Solo"];
+  const lbDivisions = DIVISIONS.filter(d=>d!=="Relay" && lbAllowedDivisions.includes(d));
   const fontScale = 1.2;
   const nextEv = nextEventAfter(ev);
   const nextEvSignupIndex = nextEv ? buildNextEventSignupIndex(nextEv) : null;
@@ -4173,13 +4180,14 @@ if(DIRECT_STARTLIST_MODE){
   // Firestore's onSnapshot listener (wired in initCloudSync) re-renders this
   // instantly whenever a new result is pushed from the Results tab.
   renderFinishTimeTV();
-} else if(DIRECT_LEADERBOARD_MODE){
-  // Public TV/signage leaderboard — no login. Results changes arrive via
-  // Firestore writes (finish times saved on the Live tab), which
-  // onSnapshot already re-renders this for instantly. But the "hide a
-  // division 30 minutes after its last heat finishes" rule is time-based,
-  // not data-based, so it also needs its own periodic tick to actually
-  // catch that 30-minute mark rather than waiting on the next result.
+} else if(DIRECT_LEADERBOARD_MODE || DIRECT_LEADERBOARD2_MODE){
+  // Public TV/signage leaderboard — no login (split across two physical
+  // screens: leaderboard = men's divisions, leaderboard2 = women's +
+  // mixed, both rendered by the same function). Results changes arrive
+  // via Firestore writes (finish times saved on the Live tab), which
+  // onSnapshot already re-renders this instantly, but the periodic tick
+  // also re-checks pickUpcomingEventId() so this stays pointed at the
+  // right event as the calendar moves, not just when results change.
   renderLeaderboardTV();
   setInterval(renderLeaderboardTV, 60000);
 } else if(DIRECT_NEXTHEAT_MODE){
