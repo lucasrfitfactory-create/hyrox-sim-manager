@@ -365,12 +365,15 @@ const DIRECT_IPAD_MODE = new URLSearchParams(window.location.search).get("view")
    touches a result — so anyone can be handed this laptop without needing
    an admin login or any risk of them changing something. */
 const DIRECT_TVRESULTS_MODE = new URLSearchParams(window.location.search).get("view") === "tv-results";
-// Signage that's inherently about what's coming up (who's racing, when,
-// next heat) rather than reporting on results -- these should default a
-// fresh device to the soonest UPCOMING event, same as the athlete/
-// volunteer login, instead of the general "most recently held event"
-// fallback that's right for the leaderboard/finish-time/results screens.
-const FORWARD_LOOKING_VIEW = DIRECT_ATHLETE_MODE || DIRECT_STARTLIST_MODE || DIRECT_NEXTHEAT_MODE || DIRECT_IPAD_MODE;
+// Signage that should default a fresh device to the soonest UPCOMING
+// event rather than the general "most recently held event" fallback --
+// originally just the forward-looking schedule/countdown screens, but the
+// leaderboard is included too now that the next event is imminent: once
+// Sept 13 becomes the soonest upcoming event it naturally stays selected
+// through and past race day (falling back to "most recent" again only
+// once a later event exists to be upcoming instead), the same way this
+// already works for the others below.
+const FORWARD_LOOKING_VIEW = DIRECT_ATHLETE_MODE || DIRECT_STARTLIST_MODE || DIRECT_NEXTHEAT_MODE || DIRECT_IPAD_MODE || DIRECT_LEADERBOARD_MODE;
 
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
