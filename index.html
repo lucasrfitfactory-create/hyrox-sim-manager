@@ -2934,8 +2934,15 @@ let liveTabFilters = { hideFinished: false };
 function renderLiveTab(main){
   const ev = curEvent();
   const todayStr = new Date().toISOString().slice(0,10);
+  // Racing heats float ahead of ones that haven't started, so as many
+  // people as possible can see their own timer without scrolling -- but a
+  // heat that finishes stays exactly where it was (still ranked with the
+  // "started" group) rather than jumping down to the very end. Anyone
+  // watching a specific card mid-race can keep watching it after it's
+  // done instead of having to go find it again; use "Hide fully finished
+  // heats" above if you want them out of the way entirely.
   const heats = ev.heats.slice().sort((a,b)=>{
-    const rank = h => { const started=!!h.actualStartTs; const parts=h.participantIds.map(id=>ev.participants.find(p=>p.id===id)).filter(Boolean); const done = started && parts.length>0 && parts.every(p=>(ev.results||[]).some(r=>r.heatId===h.id && r.participantId===p.id)); return done?2:started?0:1; };
+    const rank = h => !!h.actualStartTs ? 0 : 1;
     return rank(a)-rank(b) || (timeToMin(a.time)-timeToMin(b.time));
   });
   main.innerHTML = `
@@ -2975,7 +2982,7 @@ function renderLiveTab(main){
               return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:8px 10px;background:var(--bg3);border-radius:6px;">
                 <span>${esc(teamLabel(p))}</span>
                 ${r
-                  ? `<span style="display:flex;align-items:center;gap:8px;"><b style="font-variant-numeric:tabular-nums;">${fmtElapsed(r.elapsedMs)}</b> <span class="badge green">✓ Saved</span> <button class="small" data-undo-finish="${h.id}|${p.id}">Undo</button></span>`
+                  ? `<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b style="font-variant-numeric:tabular-nums;">${fmtElapsed(r.elapsedMs)}</b> <span class="badge green">✓ Saved</span> <button class="small" data-undo-finish="${h.id}|${p.id}">Undo</button> <button class="small" data-tv-display="${h.id}|${p.id}">📺 Display on Screen</button></span>`
                   : `<button class="primary small" data-end-race="${h.id}|${p.id}">⏱ End Race</button>`}
               </div>`;
             }).join("")}
@@ -3013,6 +3020,7 @@ function renderLiveTab(main){
       undoFinish(heatId, pid);
     });
   });
+  wireTvDisplayButtons();
 }
 setInterval(()=>{
   // This heartbeat used to run unconditionally on EVERY open page -- every
@@ -3608,7 +3616,7 @@ function nhtvHeroHtml(ev, nextHeat, now, fontScale){
   const ms = heatScheduledTs(ev, nextHeat) - now;
   return `<div style="text-align:center;">
     <div style="font-size:${1.1*fontScale}em;letter-spacing:3px;font-weight:700;color:var(--muted);">NEXT HEAT IN</div>
-    <div style="margin-top:${14*fontScale}px;">${nhtvCountdownHtml(ms, fontScale*2.2)}</div>
+    <div style="margin-top:${14*fontScale}px;">${nhtvCountdownHtml(ms, fontScale*1.98)}</div>
     <div style="font-size:${1.6*fontScale}em;font-weight:800;margin-top:${22*fontScale}px;">${esc(nextHeat.division)} · Heat ${nextHeat.heatNumberInDivision}</div>
     <div style="font-size:${1.1*fontScale}em;color:var(--muted);margin-top:4px;">Scheduled ${fmt12(nextHeat.time)}</div>
     ${namesHtml}
