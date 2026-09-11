@@ -3624,7 +3624,7 @@ function nhtvHeroHtml(ev, nextHeat, now, fontScale){
   const ms = heatScheduledTs(ev, nextHeat) - now;
   return `<div style="text-align:center;">
     <div style="font-size:${1.1*fontScale}em;letter-spacing:3px;font-weight:700;color:var(--muted);">NEXT HEAT IN</div>
-    <div style="margin-top:${14*fontScale}px;">${nhtvCountdownHtml(ms, fontScale*1.98)}</div>
+    <div style="margin-top:${14*fontScale}px;">${nhtvCountdownHtml(ms, fontScale*1.782)}</div>
     <div style="font-size:${1.6*fontScale}em;font-weight:800;margin-top:${22*fontScale}px;">${esc(nextHeat.division)} · Heat ${nextHeat.heatNumberInDivision}</div>
     <div style="font-size:${1.1*fontScale}em;color:var(--muted);margin-top:4px;">Scheduled ${fmt12(nextHeat.time)}</div>
     ${namesHtml}
