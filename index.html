@@ -2918,6 +2918,14 @@ function recordFinish(heatId, participantId){
 function undoFinish(heatId, participantId){
   const ev = curEvent();
   const existing = (ev.results||[]).find(r=>r.heatId===heatId && r.participantId===participantId);
+  const p = ev.participants.find(x=>x.id===participantId);
+  const label = p ? teamLabel(p) : "this participant";
+  const timeLabel = existing ? fmtElapsed(existing.elapsedMs) : "their time";
+  // One accidental tap used to permanently clear a saved finish with no
+  // second chance -- a plain confirm before it happens costs nothing and
+  // the finish-time log (Settings) is a separate recovery path if it's
+  // still confirmed by mistake.
+  if(!confirm(`Undo ${label}'s saved time (${timeLabel})? They'll need to be timed again -- this can't be undone.`)) return;
   logFinishEvent("undone", heatId, participantId, existing ? existing.elapsedMs : null);
   saveResultChange(e=>{
     e.results = (e.results||[]).filter(r=>!(r.heatId===heatId && r.participantId===participantId));
