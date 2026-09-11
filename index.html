@@ -376,8 +376,13 @@ const DIRECT_TVRESULTS_MODE = new URLSearchParams(window.location.search).get("v
 // Sept 13 becomes the soonest upcoming event it naturally stays selected
 // through and past race day (falling back to "most recent" again only
 // once a later event exists to be upcoming instead), the same way this
-// already works for the others below.
-const FORWARD_LOOKING_VIEW = DIRECT_ATHLETE_MODE || DIRECT_STARTLIST_MODE || DIRECT_NEXTHEAT_MODE || DIRECT_IPAD_MODE || DIRECT_LEADERBOARD_MODE || DIRECT_LEADERBOARD2_MODE;
+// already works for the others below. finishtime and tv-results are live
+// race-day screens too and were missing from this list -- a device that
+// still had Aug 9 in its localStorage (Aug 9's event doc never goes away)
+// would have stayed stuck showing/recording against Aug 9 forever, since
+// the non-forward-looking fallback only re-picks an event when the stored
+// one no longer exists at all.
+const FORWARD_LOOKING_VIEW = DIRECT_ATHLETE_MODE || DIRECT_STARTLIST_MODE || DIRECT_NEXTHEAT_MODE || DIRECT_IPAD_MODE || DIRECT_LEADERBOARD_MODE || DIRECT_LEADERBOARD2_MODE || DIRECT_FINISHTIME_MODE || DIRECT_TVRESULTS_MODE;
 
 /* Admin login is handled by Firebase Authentication (see below) — no password
    is stored in this file. The admin account is created once in the Firebase
